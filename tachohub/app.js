@@ -36,6 +36,12 @@ function fail(message) {
   setStatus(message);
 }
 
+function logDebug(label, details) {
+  if (!window.console || typeof console.info !== "function") return;
+
+  console.info(`[TachoHub] ${label}`, details || "");
+}
+
 function getParam(name) {
   const value = queryParams.get(name);
   if (!value || !value.trim()) return "";
@@ -174,10 +180,12 @@ function loadScript(src) {
 
 function loadWialonSdk(baseUrl) {
   if (window.wialon && wialon.core && wialon.core.Session) {
+    logDebug("Wialon SDK already loaded");
     return Promise.resolve();
   }
 
   if (!sdkLoadPromise) {
+    logDebug("Loading Wialon SDK", { baseUrl });
     sdkLoadPromise = loadScript(`${baseUrl}/wsdk/script/wialon.js`);
   }
 
@@ -218,17 +226,25 @@ function getRemote() {
 }
 
 function initSession(baseUrl) {
-  getSession().initSession(baseUrl, APP_DNS, WIALON_SESSION_FLAGS);
+  logDebug("Initializing Wialon session", { baseUrl });
+  getSession().initSession(baseUrl);
 }
 
 function loginWithSid(sid, user) {
   return new Promise((resolve, reject) => {
+    logDebug("Trying SID login", {
+      hasSid: Boolean(sid),
+      user: user || ""
+    });
+
     getSession().duplicate(sid, user || "", true, (code) => {
       if (code) {
+        logDebug("SID login failed", { code, error: getWialonErrorText(code) });
         reject(new AuthRequiredError(`${getWialonErrorText(code)} during SID login.`));
         return;
       }
 
+      logDebug("SID login succeeded");
       resolve();
     });
   });
@@ -236,12 +252,16 @@ function loginWithSid(sid, user) {
 
 function loginWithAuthHash(authHash) {
   return new Promise((resolve, reject) => {
-    getSession().loginAuthHash(authHash, (code) => {
+    logDebug("Trying authorization hash login", { hasAuthHash: Boolean(authHash) });
+
+    getSession().loginAuthHash(authHash, "", (code) => {
       if (code) {
+        logDebug("Authorization hash login failed", { code, error: getWialonErrorText(code) });
         reject(new AuthRequiredError(`${getWialonErrorText(code)} during authorization hash login.`));
         return;
       }
 
+      logDebug("Authorization hash login succeeded");
       removeReturnedAuthHashFromUrl();
       resolve();
     });
@@ -255,11 +275,22 @@ async function authenticateFromLaunchParams(baseUrl) {
   const user = getLaunchUser();
   const authHash = getLaunchAuthHash();
 
+  logDebug("Launch auth parameters", {
+    hasSid: Boolean(sid),
+    hasAuthHash: Boolean(authHash),
+    user
+  });
+
   if (sid) {
     try {
       await loginWithSid(sid, user);
       return;
     } catch (err) {
+      logDebug("SID login did not complete", {
+        hasAuthHashFallback: Boolean(authHash),
+        error: err && err.message ? err.message : String(err)
+      });
+
       if (!authHash) throw err;
     }
   }
@@ -278,6 +309,8 @@ function wialonCall(svc, callParams) {
       if (code) {
         const message = `${getWialonErrorText(code)} for ${svc}`;
 
+        logDebug("Remote call failed", { svc, code, error: getWialonErrorText(code) });
+
         if (isAuthErrorCode(code)) {
           reject(new AuthRequiredError(message));
           return;
@@ -287,6 +320,7 @@ function wialonCall(svc, callParams) {
         return;
       }
 
+      logDebug("Remote call succeeded", { svc });
       resolve(result);
     });
   });
@@ -315,8 +349,12 @@ function getAccountIdFromSdk() {
 
 async function getCurrentAccountId() {
   const sdkAccountId = getAccountIdFromSdk();
-  if (sdkAccountId) return sdkAccountId;
+  if (sdkAccountId) {
+    logDebug("Account ID read from SDK user object", { accountId: sdkAccountId });
+    return sdkAccountId;
+  }
 
+  logDebug("Account ID not available on SDK user object; using core/duplicate restore");
   const sessionInfo = await wialonCall("core/duplicate", { restore: 1 });
   const accountId = sessionInfo && sessionInfo.user && sessionInfo.user.bact;
 
@@ -324,10 +362,13 @@ async function getCurrentAccountId() {
     throw new Error("Can't determine the account ID of the current Wialon user.");
   }
 
+  logDebug("Account ID read from session restore", { accountId });
   return accountId;
 }
 
 async function getAccountCustomFields(accountId) {
+  logDebug("Loading account custom fields", { accountId });
+
   const response = await wialonCall("core/search_item", {
     id: accountId,
     flags: RESOURCE_CUSTOM_FIELDS_FLAG
@@ -338,6 +379,10 @@ async function getAccountCustomFields(accountId) {
   if (!item) {
     throw new Error("Could not load current account/resource.");
   }
+
+  logDebug("Account custom fields loaded", {
+    hasFields: Boolean(item.flds)
+  });
 
   return item.flds || null;
 }
@@ -387,6 +432,8 @@ async function loadApplication() {
     throw new Error(`Could not find custom field '${TOKEN_FIELD}' on this account/resource.`);
   }
 
+  logDebug("TachoHub token found in account custom fields");
+
   const iframe = document.getElementById("tachohub");
 
   if (!iframe) {
@@ -409,7 +456,7 @@ function buildLoginUrl() {
   loginUrl.searchParams.set("client_id", APP_DNS);
   loginUrl.searchParams.set("access_type", "-1");
   loginUrl.searchParams.set("response_type", "hash");
-  loginUrl.searchParams.set("redirect_uri", `${loginHost}/post_token.html`);
+  loginUrl.searchParams.set("redirect_uri", `${loginHost}/post_message.html`);
   loginUrl.searchParams.set("flags", "1");
   loginUrl.searchParams.set("lang", getLaunchLanguage());
 
@@ -421,6 +468,20 @@ function buildLoginUrl() {
 
 function extractAuthHashFromMessage(message) {
   if (typeof message !== "string") return "";
+
+  if (message.indexOf("loginauth:") === 0) {
+    try {
+      const payload = JSON.parse(message.slice("loginauth:".length));
+      return (
+        payload.access_hash ||
+        payload.authHash ||
+        payload.hash ||
+        ""
+      ).trim();
+    } catch (_err) {
+      return "";
+    }
+  }
 
   const normalized = message.includes("?") || message.includes("#")
     ? message.replace(/^.*[?#]/, "")
@@ -443,6 +504,11 @@ function showLoginPanel(reason) {
   const reloadApp = document.getElementById("reload-app");
   const loginUrl = buildLoginUrl();
   const allowedOrigin = new URL(getLoginHostUrl()).origin;
+
+  logDebug("Showing Wialon login panel", {
+    reason,
+    loginHost: getLoginHostUrl()
+  });
 
   if (!loginPanel || !loginFrame || !loginTitle || !openLogin || !reloadApp) {
     fail(reason || "Wialon login is required.");
@@ -471,6 +537,8 @@ function showLoginPanel(reason) {
     const authHash = extractAuthHashFromMessage(event.data);
     if (!authHash) return;
 
+    logDebug("Received authorization hash from Wialon login form");
+
     try {
       setStatus("Logging in to Wialon...");
       hideLoginPanel();
@@ -495,6 +563,13 @@ function hideLoginPanel() {
 
 async function main() {
   const baseUrl = getApiBaseUrl();
+
+  logDebug("Starting app", {
+    baseUrl,
+    hostUrl: getLoginHostUrl(),
+    lang: getLaunchLanguage(),
+    hasDeviceId: Boolean(getParam("deviceId"))
+  });
 
   setStatus("Loading Wialon SDK...");
   await loadWialonSdk(baseUrl);
