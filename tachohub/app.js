@@ -92,6 +92,7 @@ function initWialonSessionWithSid(baseUrl, sid) {
       callback
     */
     session.duplicate(sid, user, true, (code) => {
+      console.log(code);
       if (code) {
         reject(new Error(getWialonErrorText(code)));
         return;
