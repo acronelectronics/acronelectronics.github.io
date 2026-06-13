@@ -79,6 +79,8 @@ function initWialonSessionWithSid(baseUrl, sid) {
       return;
     }
 
+    const user = getOptionalParam("user", "");
+
     /*
       Apps Active SID gives us the existing session.
       The JS SDK duplicate call attaches the SDK to that existing SID.
@@ -86,18 +88,17 @@ function initWialonSessionWithSid(baseUrl, sid) {
       Parameters used here:
       sid
       operateAs = ""
-      continueCurrentSession = false
+      continueCurrentSession = true
       callback
-      restore = true
     */
-    session.duplicate(sid, "", false, (code) => {
+    session.duplicate(sid, user, true, (code) => {
       if (code) {
         reject(new Error(getWialonErrorText(code)));
         return;
       }
 
       resolve(session);
-    }, true);
+    });
   });
 }
 
