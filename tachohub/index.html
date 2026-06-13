@@ -1,1 +1,120 @@
-<!doctype html><html lang="ro"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>TachoHub</title><style>body,html{margin:0;width:100%;height:100%;background:#111;color:#eee;font-family:Arial,sans-serif;overflow:hidden}#status{box-sizing:border-box;width:100%;padding:12px 14px;font-size:14px;line-height:1.4;color:#eee;background:#181818}#tachohub{width:100%;height:100vh;border:none;display:none;background:#111}</style><script src="https://hst-api.wialon.com/wsdk/script/wialon.js"></script></head><body><div id="status">Loading TachoHub...</div><iframe id="tachohub" title="TachoHub" referrerpolicy="no-referrer" allow="fullscreen"></iframe><script src="app.js"></script></body></html>
+<!doctype html>
+<html lang="ro">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>TachoHub</title>
+  <style>
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: #101114;
+      color: #f4f4f5;
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+    }
+
+    #status {
+      box-sizing: border-box;
+      width: 100%;
+      padding: 12px 14px;
+      font-size: 14px;
+      line-height: 1.4;
+      color: #f4f4f5;
+      background: #181a20;
+      white-space: pre-wrap;
+    }
+
+    #tachohub {
+      width: 100%;
+      height: 100vh;
+      border: 0;
+      display: none;
+      background: #101114;
+    }
+
+    #login-panel {
+      position: fixed;
+      inset: 0;
+      display: none;
+      background: #101114;
+      z-index: 10;
+    }
+
+    #login-header {
+      box-sizing: border-box;
+      min-height: 56px;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      background: #181a20;
+      border-bottom: 1px solid #2a2d36;
+    }
+
+    #login-title {
+      font-size: 14px;
+      line-height: 1.35;
+      color: #f4f4f5;
+    }
+
+    #login-actions {
+      display: flex;
+      gap: 8px;
+      flex: 0 0 auto;
+    }
+
+    .button {
+      appearance: none;
+      border: 1px solid #3b82f6;
+      border-radius: 6px;
+      background: #2563eb;
+      color: #fff;
+      font: inherit;
+      font-size: 13px;
+      line-height: 1;
+      padding: 9px 12px;
+      cursor: pointer;
+    }
+
+    .button.secondary {
+      border-color: #3f4350;
+      background: #242731;
+    }
+
+    #wialon-login {
+      width: 100%;
+      height: calc(100vh - 56px);
+      border: 0;
+      background: #fff;
+    }
+  </style>
+</head>
+<body>
+  <div id="status">Loading TachoHub...</div>
+
+  <iframe
+    id="tachohub"
+    title="TachoHub"
+    referrerpolicy="no-referrer"
+    allow="fullscreen">
+  </iframe>
+
+  <section id="login-panel" aria-label="Wialon login">
+    <header id="login-header">
+      <div id="login-title">Please log in to Wialon to continue.</div>
+      <div id="login-actions">
+        <button class="button secondary" id="reload-app" type="button">Reload app</button>
+        <button class="button" id="open-login" type="button">Open login</button>
+      </div>
+    </header>
+    <iframe id="wialon-login" title="Wialon login"></iframe>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>

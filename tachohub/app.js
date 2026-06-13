@@ -1,15 +1,27 @@
 "use strict";
 
-const DEFAULT_API_URL = "https://hst-api.wialon.com";
+const APP_DNS = "gapp_tachohub";
 const TOKEN_FIELD = "tachohub_token";
 
-const TACHOBOX_BASE_URL = "https://tachobox.flespi.io";
+const DEFAULT_API_URL = "https://hst-api.wialon.com";
+const DEFAULT_HOST_URL = "https://hosting.wialon.com";
 const DEFAULT_TACHOBOX_LANG = "ro-RO";
 const DEFAULT_TACHOBOX_THEME = "dark";
+const TACHOBOX_BASE_URL = "https://tachobox.flespi.io";
 
+const WIALON_SESSION_FLAGS = 0x800;
 const RESOURCE_CUSTOM_FIELDS_FLAG = 8;
 
-const params = new URLSearchParams(window.location.search);
+const queryParams = new URLSearchParams(window.location.search);
+let sdkLoadPromise = null;
+let loginMessageHandler = null;
+
+class AuthRequiredError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "AuthRequiredError";
+  }
+}
 
 function setStatus(message) {
   const status = document.getElementById("status");
@@ -20,19 +32,156 @@ function setStatus(message) {
 }
 
 function fail(message) {
+  hideLoginPanel();
   setStatus(message);
 }
 
-function getRequiredParam(name) {
-  const value = params.get(name);
-  if (!value || !value.trim()) return null;
+function getParam(name) {
+  const value = queryParams.get(name);
+  if (!value || !value.trim()) return "";
   return value.trim();
 }
 
-function getOptionalParam(name, fallback) {
-  const value = params.get(name);
-  if (!value || !value.trim()) return fallback;
-  return value.trim();
+function getFirstParam(names) {
+  for (const name of names) {
+    const value = getParam(name);
+    if (value) return value;
+  }
+
+  return "";
+}
+
+function stripTrailingSlash(value) {
+  return value.replace(/\/+$/, "");
+}
+
+function getApiBaseUrl() {
+  const baseUrl = getParam("baseUrl");
+  const hostUrl = getParam("hostUrl");
+
+  if (baseUrl) return stripTrailingSlash(baseUrl);
+  if (hostUrl) return stripTrailingSlash(hostUrl);
+
+  return DEFAULT_API_URL;
+}
+
+function getLoginHostUrl() {
+  const hostUrl = getParam("hostUrl");
+  if (hostUrl) return stripTrailingSlash(hostUrl);
+
+  const baseUrl = getParam("baseUrl");
+  if (!baseUrl) return DEFAULT_HOST_URL;
+
+  try {
+    const url = new URL(baseUrl);
+
+    if (url.hostname.startsWith("hst-api.")) {
+      return stripTrailingSlash(`${url.protocol}//${url.hostname.replace(/^hst-api\./, "hosting.")}`);
+    }
+
+    if (url.hostname === "dev-api.wialon.com") {
+      return "https://dev.wialon.com";
+    }
+
+    return stripTrailingSlash(`${url.protocol}//${url.hostname}`);
+  } catch (_err) {
+    return DEFAULT_HOST_URL;
+  }
+}
+
+function getLaunchUser() {
+  return getParam("user");
+}
+
+function getLaunchLanguage() {
+  return getParam("lang") || "en";
+}
+
+function getLaunchAuthHash() {
+  return (
+    getFirstParam(["authHash", "access_hash", "hash"]) ||
+    getAuthHashFromLocationHash()
+  );
+}
+
+function getAuthHashFromLocationHash() {
+  const rawHash = window.location.hash.replace(/^#/, "");
+  if (!rawHash) return "";
+
+  const params = new URLSearchParams(rawHash);
+  return (
+    params.get("authHash") ||
+    params.get("access_hash") ||
+    params.get("hash") ||
+    ""
+  ).trim();
+}
+
+function removeReturnedAuthHashFromUrl() {
+  const url = new URL(window.location.href);
+  let changed = false;
+
+  for (const name of ["authHash", "access_hash", "hash"]) {
+    if (url.searchParams.has(name)) {
+      url.searchParams.delete(name);
+      changed = true;
+    }
+  }
+
+  if (url.hash) {
+    const hashParams = new URLSearchParams(url.hash.replace(/^#/, ""));
+
+    for (const name of ["authHash", "access_hash", "hash"]) {
+      if (hashParams.has(name)) {
+        hashParams.delete(name);
+        changed = true;
+      }
+    }
+
+    const nextHash = hashParams.toString();
+    url.hash = nextHash ? `#${nextHash}` : "";
+  }
+
+  if (changed && window.history && window.history.replaceState) {
+    window.history.replaceState(null, document.title, url.toString());
+  }
+}
+
+function normalizeTachoboxLang(lang) {
+  const value = (lang || "").toLowerCase();
+
+  if (value === "ro" || value === "ro-ro") return "ro-RO";
+  if (value === "en" || value === "en-us") return "en-US";
+  if (value === "ru" || value === "ru-ru") return "ru-RU";
+
+  return lang || DEFAULT_TACHOBOX_LANG;
+}
+
+function loadScript(src) {
+  return new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+
+    script.src = src;
+    script.async = true;
+    script.charset = "UTF-8";
+
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+
+    document.head.appendChild(script);
+  });
+}
+
+function loadWialonSdk(baseUrl) {
+  if (window.wialon && wialon.core && wialon.core.Session) {
+    return Promise.resolve();
+  }
+
+  if (!sdkLoadPromise) {
+    sdkLoadPromise = loadScript(`${baseUrl}/wsdk/script/wialon.js`);
+  }
+
+  return sdkLoadPromise;
 }
 
 function getWialonErrorText(code) {
@@ -45,12 +194,16 @@ function getWialonErrorText(code) {
     return wialon.core.Errors.getErrorText(code);
   }
 
-  return `SDK error ${code}`;
+  return `Wialon error ${code}`;
+}
+
+function isAuthErrorCode(code) {
+  return code === 1 || code === 1003;
 }
 
 function getSession() {
   if (!window.wialon || !wialon.core || !wialon.core.Session) {
-    throw new Error("JS SDK did not load.");
+    throw new Error("Wialon JS SDK did not load.");
   }
 
   return wialon.core.Session.getInstance();
@@ -58,67 +211,79 @@ function getSession() {
 
 function getRemote() {
   if (!window.wialon || !wialon.core || !wialon.core.Remote) {
-    throw new Error("Remote API wrapper is not available.");
+    throw new Error("Wialon Remote API wrapper is not available.");
   }
 
   return wialon.core.Remote.getInstance();
 }
 
-function initWialonSession(baseUrl, sid, authHash) {
+function initSession(baseUrl) {
+  getSession().initSession(baseUrl, APP_DNS, WIALON_SESSION_FLAGS);
+}
+
+function loginWithSid(sid, user) {
   return new Promise((resolve, reject) => {
-    const session = getSession();
-
-    session.initSession(baseUrl);
-
-    function finish(code, methodName) {
+    getSession().duplicate(sid, user || "", true, (code) => {
       if (code) {
-        reject(new Error(`${getWialonErrorText(code)} during ${methodName}`));
+        reject(new AuthRequiredError(`${getWialonErrorText(code)} during SID login.`));
         return;
       }
 
-      resolve(session);
-    }
-
-    if (sid && typeof session.duplicate === "function") {
-      session.duplicate(sid, "", true, (code) => {
-        if (!code) {
-          resolve(session);
-          return;
-        }
-
-        console.warn("SID login failed:", code, getWialonErrorText(code));
-
-        if (authHash && typeof session.loginAuthHash === "function") {
-          session.loginAuthHash(authHash, (hashCode) => {
-            finish(hashCode, "loginAuthHash");
-          });
-          return;
-        }
-
-        reject(new Error(`${getWialonErrorText(code)} during duplicate(SID)`));
-      });
-
-      return;
-    }
-
-    if (authHash && typeof session.loginAuthHash === "function") {
-      session.loginAuthHash(authHash, (code) => {
-        finish(code, "loginAuthHash");
-      });
-      return;
-    }
-
-    reject(new Error("Missing SID/authHash or unsupported SDK login methods."));
+      resolve();
+    });
   });
+}
+
+function loginWithAuthHash(authHash) {
+  return new Promise((resolve, reject) => {
+    getSession().loginAuthHash(authHash, (code) => {
+      if (code) {
+        reject(new AuthRequiredError(`${getWialonErrorText(code)} during authorization hash login.`));
+        return;
+      }
+
+      removeReturnedAuthHashFromUrl();
+      resolve();
+    });
+  });
+}
+
+async function authenticateFromLaunchParams(baseUrl) {
+  initSession(baseUrl);
+
+  const sid = getParam("sid");
+  const user = getLaunchUser();
+  const authHash = getLaunchAuthHash();
+
+  if (sid) {
+    try {
+      await loginWithSid(sid, user);
+      return;
+    } catch (err) {
+      if (!authHash) throw err;
+    }
+  }
+
+  if (authHash) {
+    await loginWithAuthHash(authHash);
+    return;
+  }
+
+  throw new AuthRequiredError("No usable Wialon SID or authorization hash was provided.");
 }
 
 function wialonCall(svc, callParams) {
   return new Promise((resolve, reject) => {
-    const remote = getRemote();
-
-    remote.remoteCall(svc, callParams, (code, result) => {
+    getRemote().remoteCall(svc, callParams, (code, result) => {
       if (code) {
-        reject(new Error(`${getWialonErrorText(code)} for ${svc}`));
+        const message = `${getWialonErrorText(code)} for ${svc}`;
+
+        if (isAuthErrorCode(code)) {
+          reject(new AuthRequiredError(message));
+          return;
+        }
+
+        reject(new Error(message));
         return;
       }
 
@@ -127,40 +292,36 @@ function wialonCall(svc, callParams) {
   });
 }
 
-function findCustomFieldValue(fieldsObject, fieldName) {
-  if (!fieldsObject) return null;
+function getAccountIdFromSdk() {
+  const session = getSession();
+  const user = session.getCurrUser && session.getCurrUser();
 
-  for (const key of Object.keys(fieldsObject)) {
-    const field = fieldsObject[key];
+  if (!user) return null;
 
-    if (field && field.n === fieldName) {
-      return field.v;
-    }
+  if (typeof user.getAccountId === "function") {
+    return user.getAccountId();
   }
+
+  if (typeof user.getData === "function") {
+    const data = user.getData();
+    if (data && data.bact) return data.bact;
+  }
+
+  if (user.bact) return user.bact;
+  if (user._data && user._data.bact) return user._data.bact;
 
   return null;
 }
 
-function buildTachoboxUrl(deviceId, token, lang) {
-  const safeDeviceId = encodeURIComponent(deviceId);
-
-  const query = new URLSearchParams();
-  query.set("token", token);
-  query.set("hidepanels", "1");
-  query.set("whitelabel", "true");
-  query.set("hidedisclaimer", "true");
-  query.set("theme", DEFAULT_TACHOBOX_THEME);
-  query.set("lang", lang || DEFAULT_TACHOBOX_LANG);
-
-  return `${TACHOBOX_BASE_URL}/#/device/${safeDeviceId}?${query.toString()}`;
-}
-
 async function getCurrentAccountId() {
+  const sdkAccountId = getAccountIdFromSdk();
+  if (sdkAccountId) return sdkAccountId;
+
   const sessionInfo = await wialonCall("core/duplicate", { restore: 1 });
   const accountId = sessionInfo && sessionInfo.user && sessionInfo.user.bact;
 
   if (!accountId) {
-    throw new Error("Can't determine the account ID of the current user.");
+    throw new Error("Can't determine the account ID of the current Wialon user.");
   }
 
   return accountId;
@@ -181,43 +342,55 @@ async function getAccountCustomFields(accountId) {
   return item.flds || null;
 }
 
-async function main() {
-  setStatus("Initializing session...");
+function findCustomFieldValue(fieldsObject, fieldName) {
+  if (!fieldsObject || typeof fieldsObject !== "object") return null;
 
-  const sid = getOptionalParam("sid", "");
-  const authHash = getOptionalParam("authHash", "") || getOptionalParam("access_hash", "");
-  const deviceId = getRequiredParam("deviceId");
-  const baseUrl = getOptionalParam("baseUrl", DEFAULT_API_URL);
-  const lang = getOptionalParam("lang", DEFAULT_TACHOBOX_LANG);
+  for (const key of Object.keys(fieldsObject)) {
+    const field = fieldsObject[key];
 
-  if (!sid && !authHash) {
-    fail("Missing SID/authHash. In Apps configurator, enable Active SID and Authorize hash.");
-    return;
+    if (field && field.n === fieldName) {
+      return field.v || null;
+    }
   }
+
+  return null;
+}
+
+function buildTachoboxUrl(deviceId, token, lang) {
+  const query = new URLSearchParams();
+
+  query.set("token", token);
+  query.set("hidepanels", "1");
+  query.set("whitelabel", "true");
+  query.set("hidedisclaimer", "true");
+  query.set("theme", DEFAULT_TACHOBOX_THEME);
+  query.set("lang", normalizeTachoboxLang(lang));
+
+  return `${TACHOBOX_BASE_URL}/#/device/${encodeURIComponent(deviceId)}?${query.toString()}`;
+}
+
+async function loadApplication() {
+  setStatus("Reading account custom fields...");
+
+  const deviceId = getParam("deviceId");
+  const lang = getLaunchLanguage() || DEFAULT_TACHOBOX_LANG;
 
   if (!deviceId) {
-    fail("Missing deviceId. Add ?deviceId=DEVICE_ID to the app URL.");
-    return;
+    throw new Error("Missing deviceId. Add deviceId=FLESPI_DEVICE_ID to the app URL.");
   }
-
-  await initWialonSession(baseUrl, sid, authHash);
-
-  setStatus("Reading account custom fields...");
 
   const accountId = await getCurrentAccountId();
   const customFields = await getAccountCustomFields(accountId);
   const token = findCustomFieldValue(customFields, TOKEN_FIELD);
 
   if (!token) {
-    fail(`Could not find custom field '${TOKEN_FIELD}' on this account/resource.`);
-    return;
+    throw new Error(`Could not find custom field '${TOKEN_FIELD}' on this account/resource.`);
   }
 
   const iframe = document.getElementById("tachohub");
 
   if (!iframe) {
-    fail("Missing iframe element with id='tachohub'.");
-    return;
+    throw new Error("Missing iframe element with id='tachohub'.");
   }
 
   iframe.src = buildTachoboxUrl(deviceId, token, lang);
@@ -225,6 +398,119 @@ async function main() {
 
   const status = document.getElementById("status");
   if (status) status.style.display = "none";
+
+  hideLoginPanel();
+}
+
+function buildLoginUrl() {
+  const loginHost = getLoginHostUrl();
+  const loginUrl = new URL(`${loginHost}/login.html`);
+
+  loginUrl.searchParams.set("client_id", APP_DNS);
+  loginUrl.searchParams.set("access_type", "-1");
+  loginUrl.searchParams.set("response_type", "hash");
+  loginUrl.searchParams.set("redirect_uri", `${loginHost}/post_token.html`);
+  loginUrl.searchParams.set("flags", "1");
+  loginUrl.searchParams.set("lang", getLaunchLanguage());
+
+  const user = getLaunchUser();
+  if (user) loginUrl.searchParams.set("user", user);
+
+  return loginUrl.toString();
+}
+
+function extractAuthHashFromMessage(message) {
+  if (typeof message !== "string") return "";
+
+  const normalized = message.includes("?") || message.includes("#")
+    ? message.replace(/^.*[?#]/, "")
+    : message;
+
+  const params = new URLSearchParams(normalized);
+  return (
+    params.get("access_hash") ||
+    params.get("authHash") ||
+    params.get("hash") ||
+    ""
+  ).trim();
+}
+
+function showLoginPanel(reason) {
+  const loginPanel = document.getElementById("login-panel");
+  const loginFrame = document.getElementById("wialon-login");
+  const loginTitle = document.getElementById("login-title");
+  const openLogin = document.getElementById("open-login");
+  const reloadApp = document.getElementById("reload-app");
+  const loginUrl = buildLoginUrl();
+  const allowedOrigin = new URL(getLoginHostUrl()).origin;
+
+  if (!loginPanel || !loginFrame || !loginTitle || !openLogin || !reloadApp) {
+    fail(reason || "Wialon login is required.");
+    return;
+  }
+
+  loginTitle.textContent = reason || "Please log in to Wialon to continue.";
+  loginPanel.style.display = "block";
+  loginFrame.src = loginUrl;
+
+  openLogin.onclick = () => {
+    window.open(loginUrl, "_blank", "width=760,height=560");
+  };
+
+  reloadApp.onclick = () => {
+    window.location.reload();
+  };
+
+  if (loginMessageHandler) {
+    window.removeEventListener("message", loginMessageHandler);
+  }
+
+  loginMessageHandler = async (event) => {
+    if (event.origin !== allowedOrigin) return;
+
+    const authHash = extractAuthHashFromMessage(event.data);
+    if (!authHash) return;
+
+    try {
+      setStatus("Logging in to Wialon...");
+      hideLoginPanel();
+      initSession(getApiBaseUrl());
+      await loginWithAuthHash(authHash);
+      await loadApplication();
+    } catch (err) {
+      showLoginPanel(err && err.message ? err.message : "Wialon login failed.");
+    }
+  };
+
+  window.addEventListener("message", loginMessageHandler);
+}
+
+function hideLoginPanel() {
+  const loginPanel = document.getElementById("login-panel");
+  const loginFrame = document.getElementById("wialon-login");
+
+  if (loginPanel) loginPanel.style.display = "none";
+  if (loginFrame) loginFrame.removeAttribute("src");
+}
+
+async function main() {
+  const baseUrl = getApiBaseUrl();
+
+  setStatus("Loading Wialon SDK...");
+  await loadWialonSdk(baseUrl);
+
+  try {
+    setStatus("Initializing Wialon session...");
+    await authenticateFromLaunchParams(baseUrl);
+    await loadApplication();
+  } catch (err) {
+    if (err instanceof AuthRequiredError) {
+      showLoginPanel(err.message);
+      return;
+    }
+
+    throw err;
+  }
 }
 
 main().catch((err) => {
