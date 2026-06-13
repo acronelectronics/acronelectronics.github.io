@@ -64,42 +64,51 @@ function getRemote() {
   return wialon.core.Remote.getInstance();
 }
 
-function initWialonSessionWithSid(baseUrl, sid) {
+function initWialonSession(baseUrl, sid, authHash) {
   return new Promise((resolve, reject) => {
     const session = getSession();
 
     session.initSession(baseUrl);
 
-    if (typeof session.duplicate !== "function") {
-      reject(
-        new Error(
-          "This JS SDK version does not expose session.duplicate(). Use Authorize hash or a backend proxy."
-        )
-      );
-      return;
-    }
-
-    const user = getOptionalParam("user", "");
-
-    /*
-      Apps Active SID gives us the existing session.
-      The JS SDK duplicate call attaches the SDK to that existing SID.
-
-      Parameters used here:
-      sid
-      operateAs = ""
-      continueCurrentSession = true
-      callback
-    */
-    session.duplicate(sid, user, true, (code) => {
-      console.log(code);
+    function finish(code, methodName) {
       if (code) {
-        reject(new Error(getWialonErrorText(code)));
+        reject(new Error(`${getWialonErrorText(code)} during ${methodName}`));
         return;
       }
 
       resolve(session);
-    });
+    }
+
+    if (sid && typeof session.duplicate === "function") {
+      session.duplicate(sid, "", true, (code) => {
+        if (!code) {
+          resolve(session);
+          return;
+        }
+
+        console.warn("SID login failed:", code, getWialonErrorText(code));
+
+        if (authHash && typeof session.loginAuthHash === "function") {
+          session.loginAuthHash(authHash, (hashCode) => {
+            finish(hashCode, "loginAuthHash");
+          });
+          return;
+        }
+
+        reject(new Error(`${getWialonErrorText(code)} during duplicate(SID)`));
+      });
+
+      return;
+    }
+
+    if (authHash && typeof session.loginAuthHash === "function") {
+      session.loginAuthHash(authHash, (code) => {
+        finish(code, "loginAuthHash");
+      });
+      return;
+    }
+
+    reject(new Error("Missing SID/authHash or unsupported SDK login methods."));
   });
 }
 
@@ -175,13 +184,14 @@ async function getAccountCustomFields(accountId) {
 async function main() {
   setStatus("Initializing session...");
 
-  const sid = getRequiredParam("sid");
+  const sid = getOptionalParam("sid", "");
+  const authHash = getOptionalParam("authHash", "") || getOptionalParam("access_hash", "");
   const deviceId = getRequiredParam("deviceId");
   const baseUrl = getOptionalParam("baseUrl", DEFAULT_API_URL);
   const lang = getOptionalParam("lang", DEFAULT_TACHOBOX_LANG);
 
-  if (!sid) {
-    fail("Missing SID. In Apps configurator, enable Advanced URL parameter: Active SID.");
+  if (!sid && !authHash) {
+    fail("Missing SID/authHash. In Apps configurator, enable Active SID and Authorize hash.");
     return;
   }
 
@@ -190,7 +200,7 @@ async function main() {
     return;
   }
 
-  await initWialonSessionWithSid(baseUrl, sid);
+    await initWialonSessionWithSid(baseUrl, sid, authHash);
 
   setStatus("Reading account custom fields...");
 
