@@ -1,6 +1,6 @@
 "use strict";
 
-const DEFAULT_API_URL = "https://api.tracking.acronmanagement.com";
+const DEFAULT_API_URL = "https://hst-api.wialon.com";
 const TOKEN_FIELD = "tachohub_token";
 
 const TACHOBOX_BASE_URL = "https://tachobox.flespi.io";
