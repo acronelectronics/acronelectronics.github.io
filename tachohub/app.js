@@ -200,7 +200,7 @@ async function main() {
     return;
   }
 
-    await initWialonSessionWithSid(baseUrl, sid, authHash);
+  await initWialonSession(baseUrl, sid, authHash);
 
   setStatus("Reading account custom fields...");
 
