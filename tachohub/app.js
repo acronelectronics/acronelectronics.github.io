@@ -18,6 +18,7 @@ const LOGIN_RESPONSE_FLAGS = 1;
 const LOGIN_ACCESS_TYPE = 256;
 const LOGIN_ACTIVATION_TIME = 0;
 const LOGIN_TOKEN_DURATION = 0;
+const FRAME_LOADING_FALLBACK_MS = 15000;
 const THEMES = new Set(["dark", "light"]);
 const SUPPORTED_UI_LANGS = new Set(["en", "ro"]);
 
@@ -37,7 +38,9 @@ const appState = {
   searchText: "",
   isLoginVisible: false,
   frameLoadGeneration: 0,
-  frameReloadNonce: 0
+  frameReloadNonce: 0,
+  frameLoadingFallbackTimerId: 0,
+  statusKind: ""
 };
 
 const TEXT = {
@@ -147,10 +150,12 @@ function t(key, values = {}) {
   ));
 }
 
-function setStatus(message, isError = false, showContent = false) {
+function setStatus(message, isError = false, showContent = false, kind = "") {
   const topbarMessage = document.getElementById("topbar-message");
   const status = document.getElementById("status");
   const text = String(message || "");
+
+  appState.statusKind = text ? (kind || (isError ? "error" : "status")) : "";
 
   if (topbarMessage) {
     topbarMessage.textContent = text;
@@ -164,9 +169,13 @@ function setStatus(message, isError = false, showContent = false) {
   status.style.display = text && (showContent || isError) ? "flex" : "none";
 }
 
-function hideStatus() {
+function hideStatus(kind = "") {
+  if (kind && appState.statusKind !== kind) return;
+
   const topbarMessage = document.getElementById("topbar-message");
   const status = document.getElementById("status");
+
+  appState.statusKind = "";
 
   if (topbarMessage) {
     topbarMessage.textContent = "";
@@ -178,6 +187,33 @@ function hideStatus() {
     status.classList.remove("error");
     status.style.display = "none";
   }
+}
+
+function clearFrameLoadingFallback() {
+  if (!appState.frameLoadingFallbackTimerId) return;
+
+  window.clearTimeout(appState.frameLoadingFallbackTimerId);
+  appState.frameLoadingFallbackTimerId = 0;
+}
+
+function clearFrameLoadingStatus(generation, reason) {
+  if (appState.frameLoadGeneration !== generation) return;
+
+  clearFrameLoadingFallback();
+  hideStatus("frame-loading");
+  logDebug("Frame loading status cleared", { generation, reason });
+}
+
+function scheduleFrameLoadingFallback(generation) {
+  clearFrameLoadingFallback();
+
+  appState.frameLoadingFallbackTimerId = window.setTimeout(() => {
+    if (appState.frameLoadGeneration !== generation) return;
+
+    appState.frameLoadingFallbackTimerId = 0;
+    hideStatus("frame-loading");
+    logDebug("Frame loading status cleared by fallback", { generation });
+  }, FRAME_LOADING_FALLBACK_MS);
 }
 
 function fail(message) {
@@ -813,13 +849,14 @@ function loadHubFrame(deviceId, options = {}) {
   appState.currentFrameDeviceId = selectedDevice.id;
 
   if (options.showLoading) {
-    setStatus(t("loadingFrame"));
+    setStatus(t("loadingFrame"), false, false, "frame-loading");
+    scheduleFrameLoadingFallback(generation);
+  } else {
+    clearFrameLoadingFallback();
   }
 
   iframe.style.display = "block";
-  iframe.onload = () => {
-    if (appState.frameLoadGeneration === generation) hideStatus();
-  };
+  iframe.addEventListener("load", () => clearFrameLoadingStatus(generation, "load"), { once: true });
   iframe.src = url;
 }
 
