@@ -52,7 +52,7 @@
       height: var(--topbar-height);
       padding: 0 12px;
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(120px, 2fr) minmax(0, 1fr);
+      grid-template-columns: minmax(0, 1fr) auto;
       align-items: center;
       column-gap: 12px;
       background: var(--panel);
@@ -96,22 +96,6 @@
       white-space: nowrap;
     }
 
-    #topbar-message {
-      min-width: 0;
-      max-width: 100%;
-      color: var(--muted);
-      font-size: 13px;
-      line-height: 1.35;
-      overflow: hidden;
-      text-align: center;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      justify-self: stretch;
-    }
-
-    #topbar-message.error {
-      color: var(--danger);
-    }
 
     #app-shell {
       height: calc(100vh - var(--topbar-height));
@@ -310,7 +294,6 @@
       <button class="button secondary" id="panel-toggle" type="button" aria-controls="vehicle-panel" aria-expanded="true"></button>
       <div id="app-title">Acron Tacho Hub</div>
     </div>
-    <div id="topbar-message" role="status" aria-live="polite"></div>
     <div id="topbar-actions">
       <button class="button secondary" id="theme-toggle" type="button"></button>
       <button class="button secondary" id="app-reload" type="button"></button>

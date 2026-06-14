@@ -141,46 +141,51 @@ class AuthRequiredError extends Error {
   }
 }
 
-function t(key, values = {}) {
-  const dictionary = TEXT[appState.uiLang] || TEXT.en;
-  const template = dictionary[key] || TEXT.en[key] || key;
-
-  return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, name) => (
+function formatText(template, values = {}) {
+  return String(template || "").replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, name) => (
     Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : ""
   ));
 }
 
-function setStatus(message, isError = false, showContent = false, kind = "") {
-  const topbarMessage = document.getElementById("topbar-message");
+function t(key, values = {}) {
+  const dictionary = TEXT[appState.uiLang] || TEXT.en;
+  return formatText(dictionary[key] || TEXT.en[key] || key, values);
+}
+
+function tEnglish(key, values = {}) {
+  return formatText(TEXT.en[key] || key, values);
+}
+
+function setStatus(message, isError = false, _showContent = false, kind = "") {
   const status = document.getElementById("status");
   const text = String(message || "");
 
   appState.statusKind = text ? (kind || (isError ? "error" : "status")) : "";
 
-  if (topbarMessage) {
-    topbarMessage.textContent = text;
-    topbarMessage.classList.toggle("error", Boolean(isError));
+  if (!status) {
+    if (text && !isError) logDebug("Status", { message: text });
+    return;
   }
 
-  if (!status) return;
+  if (!isError) {
+    status.textContent = "";
+    status.classList.remove("error");
+    status.style.display = "none";
+    if (text) logDebug("Status", { message: text, kind: appState.statusKind });
+    return;
+  }
 
   status.textContent = text;
-  status.classList.toggle("error", Boolean(isError));
-  status.style.display = text && (showContent || isError) ? "flex" : "none";
+  status.classList.add("error");
+  status.style.display = text ? "flex" : "none";
 }
 
 function hideStatus(kind = "") {
   if (kind && appState.statusKind !== kind) return;
 
-  const topbarMessage = document.getElementById("topbar-message");
   const status = document.getElementById("status");
 
   appState.statusKind = "";
-
-  if (topbarMessage) {
-    topbarMessage.textContent = "";
-    topbarMessage.classList.remove("error");
-  }
 
   if (status) {
     status.textContent = "";
@@ -222,8 +227,16 @@ function fail(message) {
 }
 
 function logDebug(label, details) {
-  if (!window.console || typeof console.info !== "function") return;
-  console.info(`[Acron Tacho Hub] ${label}`, details || "");
+  if (!window.console) return;
+
+  const write = typeof console.debug === "function"
+    ? console.debug.bind(console)
+    : typeof console.info === "function"
+      ? console.info.bind(console)
+      : null;
+
+  if (!write) return;
+  write(`[Acron Tacho Hub] ${label}`, details || "");
 }
 
 function getParam(name) {
@@ -849,7 +862,7 @@ function loadHubFrame(deviceId, options = {}) {
   appState.currentFrameDeviceId = selectedDevice.id;
 
   if (options.showLoading) {
-    setStatus(t("loadingFrame"), false, false, "frame-loading");
+    setStatus(tEnglish("loadingFrame"), false, false, "frame-loading");
     scheduleFrameLoadingFallback(generation);
   } else {
     clearFrameLoadingFallback();
@@ -861,11 +874,11 @@ function loadHubFrame(deviceId, options = {}) {
 }
 
 async function loadApplication() {
-  setStatus(t("loadingAccountSettings"));
+  setStatus(tEnglish("loadingAccountSettings"));
 
   appState.frameToken = await loadFrameTokenFromAccount();
 
-  setStatus(t("loadingVehicles"));
+  setStatus(tEnglish("loadingVehicles"));
   appState.devices = await fetchDevices(appState.frameToken);
 
   const initialDeviceId = chooseInitialDevice();
@@ -950,7 +963,7 @@ function showLoginPanel(reason) {
   const allowedOrigin = new URL(getLoginHostUrl()).origin;
   const message = reason || t("loginRequired");
 
-  logDebug("Showing login view", { reason: message, loginHost: getLoginHostUrl() });
+  logDebug("Showing login view", { loginHost: getLoginHostUrl() });
 
   if (!loginView || !loginFrame) {
     fail(message);
@@ -959,7 +972,8 @@ function showLoginPanel(reason) {
 
   appState.isLoginVisible = true;
   document.body.classList.add("login-active");
-  setStatus(message);
+  setStatus(tEnglish("loginRequired"));
+  logDebug("Login required");
 
   loginView.style.display = "block";
   loginFrame.src = loginUrl;
@@ -977,7 +991,7 @@ function showLoginPanel(reason) {
     logDebug("Received login token from login form");
 
     try {
-      setStatus(t("loggingIn"));
+      setStatus(tEnglish("loggingIn"));
       hideLoginPanel();
       setStoredLoginToken(token);
       initSession(appState.apiBaseUrl || getApiBaseUrl());
@@ -1117,11 +1131,11 @@ async function main() {
     hasStoredDeviceId: Boolean(getStoredDeviceId())
   });
 
-  setStatus(t("loadingSdk"));
+  setStatus(tEnglish("loadingSdk"));
   await loadPlatformSdk(appState.apiBaseUrl);
 
   try {
-    setStatus(t("initializingSession"));
+    setStatus(tEnglish("initializingSession"));
     await authenticate(appState.apiBaseUrl);
     await loadApplication();
   } catch (err) {
