@@ -817,12 +817,10 @@ function selectVehicle(deviceId) {
   const selected = appState.devices.find((vehicle) => vehicle.id === String(deviceId));
   if (!selected) return;
 
-  const shouldForceReload = selected.id === appState.currentFrameDeviceId;
-
   appState.selectedDeviceId = selected.id;
   setStoredDeviceId(selected.id);
   renderVehicleList();
-  loadHubFrame(selected.id, { forceReload: shouldForceReload, showLoading: true });
+  loadHubFrame(selected.id, { forceReload: true, showLoading: true });
 }
 
 function findDeviceById(deviceId) {
