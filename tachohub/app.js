@@ -13,7 +13,7 @@ const DEVICE_LIST_URL = "https://flespi.io/gw/devices/all?fields=id,name,configu
 
 const RESOURCE_CUSTOM_FIELDS_FLAG = 8;
 const LOGIN_RESPONSE_FLAGS = 1;
-const LOGIN_ACCESS_TYPE = -1;
+const LOGIN_ACCESS_TYPE = 256;
 const LOGIN_ACTIVATION_TIME = 0;
 const LOGIN_TOKEN_DURATION = 0;
 const THEMES = new Set(["dark", "light"]);
@@ -38,7 +38,6 @@ const I18N = Object.freeze({
     loadingAccountSettings: "Loading account settings...",
     loadingVehicles: "Loading vehicles...",
     loggingIn: "Logging in...",
-    ready: "Ready.",
     loginRequired: "Please log in to continue.",
     loginFailed: "Login failed.",
     appLoadFailed: "Application loading error.",
@@ -83,7 +82,6 @@ const I18N = Object.freeze({
     loadingAccountSettings: "Se încarcă setările contului...",
     loadingVehicles: "Se încarcă vehiculele...",
     loggingIn: "Autentificare...",
-    ready: "Gata.",
     loginRequired: "Autentifică-te pentru a continua.",
     loginFailed: "Autentificarea a eșuat.",
     appLoadFailed: "Eroare la încărcarea aplicației.",
@@ -128,6 +126,7 @@ const appState = {
   theme: DEFAULT_FRAME_THEME,
   devices: [],
   selectedDeviceId: "",
+  currentFrameDeviceId: "",
   searchText: ""
 };
 
@@ -160,9 +159,9 @@ function setTopbarMessage(message, isError = false) {
 function setStatus(message, isError = false) {
   const status = document.getElementById("status");
   if (status) {
-    status.textContent = message;
+    status.textContent = message || "";
     status.classList.toggle("error", Boolean(isError));
-    status.style.display = message ? "block" : "none";
+    status.style.display = isError && message ? "block" : "none";
   }
 
   setTopbarMessage(message, isError);
@@ -171,6 +170,10 @@ function setStatus(message, isError = false) {
 function hideStatus() {
   const status = document.getElementById("status");
   if (status) status.style.display = "none";
+}
+
+function clearTopbarMessage() {
+  setTopbarMessage("");
 }
 
 function fail(message) {
@@ -187,6 +190,15 @@ function getParam(name) {
   const value = queryParams.get(name);
   if (!value || !value.trim()) return "";
   return value.trim();
+}
+
+function getFirstParam(names) {
+  for (const name of names) {
+    const value = getParam(name);
+    if (value) return value;
+  }
+
+  return "";
 }
 
 function stripTrailingSlash(value) {
@@ -246,6 +258,10 @@ function getLoginHostUrl() {
 
 function getLaunchUser() {
   return getParam("user");
+}
+
+function getLaunchSessionId() {
+  return getFirstParam(["sid", "eid"]);
 }
 
 function isValidTheme(theme) {
@@ -389,20 +405,57 @@ function loginWithToken(token) {
   });
 }
 
-async function authenticateWithStoredToken(baseUrl) {
+function loginWithLaunchSession(sessionId, user) {
+  return new Promise((resolve, reject) => {
+    const cleanSessionId = (sessionId || "").trim();
+    const session = getSession();
+
+    if (!cleanSessionId || typeof session.duplicate !== "function") {
+      reject(new AuthRequiredError(t("loginRequired")));
+      return;
+    }
+
+    logDebug("Trying launch session", {
+      hasSessionId: Boolean(cleanSessionId),
+      hasUser: Boolean(user)
+    });
+
+    session.duplicate(cleanSessionId, user || "", true, (code) => {
+      if (code) {
+        const detail = getPlatformErrorText(code);
+        logDebug("Launch session failed", { code, error: detail });
+        reject(new AuthRequiredError(`${t("loginRequired")} ${detail}`.trim()));
+        return;
+      }
+
+      logDebug("Launch session succeeded");
+      resolve();
+    });
+  });
+}
+
+async function authenticate(baseUrl) {
   initSession(baseUrl);
 
   const token = getStoredLoginToken();
-  if (!token) {
-    throw new AuthRequiredError(t("loginRequired"));
+  if (token) {
+    try {
+      await loginWithToken(token);
+      return;
+    } catch (err) {
+      clearStoredLoginToken();
+      logDebug("Stored token could not be used", { error: err && err.message ? err.message : String(err) });
+    }
   }
 
-  try {
-    await loginWithToken(token);
-  } catch (err) {
-    clearStoredLoginToken();
-    throw err;
+  const launchSessionId = getLaunchSessionId();
+  if (launchSessionId) {
+    initSession(baseUrl);
+    await loginWithLaunchSession(launchSessionId, getLaunchUser());
+    return;
   }
+
+  throw new AuthRequiredError(t("loginRequired"));
 }
 
 function apiCall(svc, callParams) {
@@ -709,10 +762,11 @@ function loadHubFrame(deviceId) {
     throw new Error(t("missingFrame"));
   }
 
+  appState.currentFrameDeviceId = String(deviceId);
   iframe.src = buildFrameUrl(deviceId, appState.frameToken, appState.frameLang, appState.theme);
   iframe.style.display = "block";
   hideStatus();
-  setTopbarMessage(t("ready"));
+  clearTopbarMessage();
 }
 
 async function loadApplication() {
@@ -819,6 +873,7 @@ function showLoginView(reason) {
   }
 
   hideStatus();
+  document.body.classList.add("login-active");
   setTopbarMessage(message, Boolean(reason && reason !== t("loginRequired")));
   loginView.style.display = "block";
   loginFrame.src = loginUrl;
@@ -855,6 +910,7 @@ function hideLoginView() {
   const loginView = document.getElementById("login-view");
   const loginFrame = document.getElementById("login-frame");
 
+  document.body.classList.remove("login-active");
   if (loginView) loginView.style.display = "none";
   if (loginFrame) loginFrame.removeAttribute("src");
 }
@@ -880,8 +936,9 @@ function toggleTheme() {
   setStoredTheme(nextTheme);
   applyTheme(nextTheme);
 
-  if (appState.selectedDeviceId && appState.frameToken) {
-    loadHubFrame(appState.selectedDeviceId);
+  const activeDeviceId = appState.currentFrameDeviceId || appState.selectedDeviceId;
+  if (activeDeviceId && appState.frameToken) {
+    loadHubFrame(activeDeviceId);
   }
 }
 
@@ -896,7 +953,7 @@ function applyLocalizedText() {
   const shell = document.getElementById("app-shell");
   if (panelToggle) {
     const isHidden = shell && shell.classList.contains("nav-hidden");
-    panelToggle.textContent = isHidden ? t("showVehicles") : t("vehicles");
+    panelToggle.textContent = isHidden ? t("showVehicles") : t("hideVehicles");
     panelToggle.setAttribute("aria-label", isHidden ? t("showVehicles") : t("hideVehicles"));
   }
 
@@ -936,7 +993,7 @@ function setupUi() {
     panelToggle.addEventListener("click", () => {
       const isHidden = shell.classList.toggle("nav-hidden");
       panelToggle.setAttribute("aria-expanded", isHidden ? "false" : "true");
-      panelToggle.textContent = isHidden ? t("showVehicles") : t("vehicles");
+      panelToggle.textContent = isHidden ? t("showVehicles") : t("hideVehicles");
       panelToggle.setAttribute("aria-label", isHidden ? t("showVehicles") : t("hideVehicles"));
     });
   }
@@ -980,7 +1037,7 @@ async function main() {
 
   try {
     setStatus(t("initializingSession"));
-    await authenticateWithStoredToken(appState.apiBaseUrl);
+    await authenticate(appState.apiBaseUrl);
     await loadApplication();
   } catch (err) {
     if (err instanceof AuthRequiredError) {
