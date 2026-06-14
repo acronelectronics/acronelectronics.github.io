@@ -405,7 +405,7 @@ function buildTachoboxUrl(deviceId, token, lang) {
   const query = new URLSearchParams();
 
   query.set("token", token);
-  query.set("hidepanels", "0");
+  query.set("hidepanels", "1");
   query.set("whitelabel", "true");
   query.set("hidedisclaimer", "true");
   query.set("theme", DEFAULT_TACHOBOX_THEME);
