@@ -751,7 +751,7 @@ function buildFrameUrl(deviceId, token, lang, theme) {
   query.set("theme", isValidTheme(theme) ? theme : DEFAULT_FRAME_THEME);
   query.set("lang", lang);
 
-  return `${FRAME_BASE_URL}/#/device/${encodeURIComponent(deviceId)}?${query.toString()}`;
+  return `${FRAME_BASE_URL}/#/?${query.toString()}`;
 }
 
 function loadHubFrame(deviceId) {
