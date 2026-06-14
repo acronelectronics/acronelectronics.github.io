@@ -21,6 +21,7 @@ const LOGIN_TOKEN_DURATION = 0;
 const THEMES = new Set(["dark", "light"]);
 
 const queryParams = new URLSearchParams(window.location.search);
+const hashParams = new URLSearchParams(window.location.hash.replace(/^#\??/, ""));
 let sdkLoadPromise = null;
 let loginMessageHandler = null;
 
@@ -103,7 +104,7 @@ function logDebug(label, details) {
 }
 
 function getParam(name) {
-  const value = queryParams.get(name);
+  const value = queryParams.get(name) || hashParams.get(name) || "";
   if (!value || !value.trim()) return "";
   return value.trim();
 }
@@ -320,7 +321,7 @@ async function authenticateWithStoredToken(baseUrl) {
 
   const token = getStoredLoginToken();
   if (!token) {
-    throw new AuthRequiredError("Please log in to continue.");
+    throw new AuthRequiredError("No stored login token is available.");
   }
 
   try {
@@ -329,6 +330,73 @@ async function authenticateWithStoredToken(baseUrl) {
     clearStoredLoginToken();
     throw err;
   }
+}
+
+function getLaunchSessionId() {
+  return getParam("sid") || getParam("eid") || getParam("SID") || getParam("EID");
+}
+
+function cloneLaunchSession(sessionId, user) {
+  return new Promise((resolve, reject) => {
+    const cleanSessionId = (sessionId || "").trim();
+
+    if (!cleanSessionId) {
+      reject(new AuthRequiredError("No launch session is available."));
+      return;
+    }
+
+    const session = getSession();
+    if (typeof session.duplicate !== "function") {
+      reject(new Error("The session cloning method is not available."));
+      return;
+    }
+
+    logDebug("Trying launch session clone", {
+      hasLaunchSession: Boolean(cleanSessionId),
+      user: user || ""
+    });
+
+    session.duplicate(cleanSessionId, user || "", true, (code) => {
+      if (code) {
+        logDebug("Launch session clone failed", { code, error: getPlatformErrorText(code) });
+        reject(new AuthRequiredError(`${getPlatformErrorText(code)} during launch session clone.`));
+        return;
+      }
+
+      logDebug("Launch session clone succeeded");
+      resolve();
+    });
+  });
+}
+
+async function authenticateWithLaunchSession(baseUrl) {
+  initSession(baseUrl);
+
+  const launchSessionId = getLaunchSessionId();
+  if (!launchSessionId) {
+    throw new AuthRequiredError("No launch session was provided.");
+  }
+
+  await cloneLaunchSession(launchSessionId, getLaunchUser());
+}
+
+async function authenticate(baseUrl) {
+  if (getStoredLoginToken()) {
+    try {
+      await authenticateWithStoredToken(baseUrl);
+      return;
+    } catch (err) {
+      if (!(err instanceof AuthRequiredError)) {
+        throw err;
+      }
+
+      logDebug("Stored token was not usable; trying launch session", {
+        error: err.message || String(err)
+      });
+    }
+  }
+
+  await authenticateWithLaunchSession(baseUrl);
 }
 
 function apiCall(svc, callParams) {
@@ -878,7 +946,7 @@ async function main() {
 
   try {
     setStatus("Initializing session...");
-    await authenticateWithStoredToken(appState.apiBaseUrl);
+    await authenticate(appState.apiBaseUrl);
     await loadApplication();
   } catch (err) {
     if (err instanceof AuthRequiredError) {
