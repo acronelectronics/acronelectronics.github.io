@@ -102,6 +102,7 @@
       display: grid;
       grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
       background: var(--bg);
+      transition: grid-template-columns 220ms ease;
     }
 
     #app-shell.nav-hidden {
@@ -115,11 +116,27 @@
       background: var(--panel);
       display: flex;
       flex-direction: column;
+      opacity: 1;
+      transform: translateX(0);
+      transition:
+        transform 220ms ease,
+        opacity 180ms ease,
+        border-color 220ms ease;
+      will-change: transform, opacity;
     }
 
     #app-shell.nav-hidden #vehicle-panel {
-      border-right: 0;
-      visibility: hidden;
+      border-right-color: transparent;
+      opacity: 0;
+      pointer-events: none;
+      transform: translateX(-100%);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #app-shell,
+      #vehicle-panel {
+        transition: none;
+      }
     }
 
     #vehicle-panel-header {

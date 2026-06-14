@@ -67,7 +67,8 @@ const TEXT = {
     accountTokenMissing: "Tacho Hub not active for this account.",
     vehicleListJsonError: "Vehicle list response was not valid JSON.",
     vehicleListLoadError: "Tacho Hub access expired or is invalid.",
-    noVehiclesForToken: "No vehicles are available for this account token.",
+    noVehiclesForToken: "No vehicles are available for this account on Tacho Hub.",
+    technicalError: "Technical error.",
     missingMainFrame: "Missing main iframe element.",
     hideVehicles: "Hide vehicles",
     showVehicles: "Show vehicles",
@@ -111,7 +112,8 @@ const TEXT = {
     accountTokenMissing: "Tacho Hub nu este activ pentru acest cont.",
     vehicleListJsonError: "Răspunsul listei de vehicule nu este JSON valid.",
     vehicleListLoadError: "Accesul Tacho Hub a expirat sau nu este valid.",
-    noVehiclesForToken: "Nu există vehicule disponibile pentru tokenul acestui cont.",
+    noVehiclesForToken: "Nu există vehicule disponibile pentru acest cont în Tacho Hub.",
+    technicalError: "Eroare tehnică.",
     missingMainFrame: "Elementul iframe principal lipsește.",
     hideVehicles: "Ascunde vehiculele",
     showVehicles: "Afișează vehiculele",
@@ -141,6 +143,15 @@ class AuthRequiredError extends Error {
   }
 }
 
+class PublicDisplayError extends Error {
+  constructor(messageKey, technicalMessage = "") {
+    super(tEnglish(messageKey));
+    this.name = "PublicDisplayError";
+    this.messageKey = messageKey;
+    this.technicalMessage = technicalMessage || tEnglish(messageKey);
+  }
+}
+
 function formatText(template, values = {}) {
   return String(template || "").replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, name) => (
     Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : ""
@@ -154,6 +165,30 @@ function t(key, values = {}) {
 
 function tEnglish(key, values = {}) {
   return formatText(TEXT.en[key] || key, values);
+}
+
+function publicDisplayError(messageKey, technicalMessage = "") {
+  return new PublicDisplayError(messageKey, technicalMessage);
+}
+
+function getUserFacingErrorMessage(error) {
+  if (error instanceof PublicDisplayError && error.messageKey) {
+    return t(error.messageKey);
+  }
+
+  return t("technicalError");
+}
+
+function getTechnicalErrorMessage(error) {
+  if (error instanceof PublicDisplayError) {
+    return error.technicalMessage || error.message || error.name;
+  }
+
+  if (error instanceof Error) {
+    return error.message || error.name;
+  }
+
+  return String(error || "Unknown error");
 }
 
 function setStatus(message, isError = false, _showContent = false, kind = "") {
@@ -221,9 +256,13 @@ function scheduleFrameLoadingFallback(generation) {
   }, FRAME_LOADING_FALLBACK_MS);
 }
 
-function fail(message) {
+function fail(error) {
   hideLoginPanel();
-  setStatus(message, true, true);
+  logDebug("User-facing error", {
+    displayMessage: getUserFacingErrorMessage(error),
+    technicalMessage: getTechnicalErrorMessage(error)
+  });
+  setStatus(getUserFacingErrorMessage(error), true, true);
 }
 
 function logDebug(label, details) {
@@ -386,7 +425,7 @@ function loadScript(src) {
     script.charset = "UTF-8";
 
     script.onload = () => resolve();
-    script.onerror = () => reject(new Error(t("sdkLoadFailed", { src })));
+    script.onerror = () => reject(new Error(tEnglish("sdkLoadFailed", { src })));
 
     document.head.appendChild(script);
   });
@@ -416,7 +455,7 @@ function getPlatformErrorText(code) {
     return wialon.core.Errors.getErrorText(code);
   }
 
-  return t("remoteApiError", { code });
+  return tEnglish("remoteApiError", { code });
 }
 
 function isSessionErrorCode(code) {
@@ -425,7 +464,7 @@ function isSessionErrorCode(code) {
 
 function getSession() {
   if (!window.wialon || !wialon.core || !wialon.core.Session) {
-    throw new Error(t("missingSdk"));
+    throw new Error(tEnglish("missingSdk"));
   }
 
   return wialon.core.Session.getInstance();
@@ -433,7 +472,7 @@ function getSession() {
 
 function getRemote() {
   if (!window.wialon || !wialon.core || !wialon.core.Remote) {
-    throw new Error(t("missingRemoteWrapper"));
+    throw new Error(tEnglish("missingRemoteWrapper"));
   }
 
   return wialon.core.Remote.getInstance();
@@ -572,7 +611,7 @@ async function getCurrentAccountId() {
   const accountId = sessionInfo && sessionInfo.user && sessionInfo.user.bact;
 
   if (!accountId) {
-    throw new Error(t("accountIdError"));
+    throw new Error(tEnglish("accountIdError"));
   }
 
   logDebug("Account ID read from session metadata", { accountId });
@@ -590,7 +629,7 @@ async function getAccountCustomFields(accountId) {
   const item = response && response.item;
 
   if (!item) {
-    throw new Error(t("accountLoadError"));
+    throw new Error(tEnglish("accountLoadError"));
   }
 
   logDebug("Account custom fields loaded", { hasFields: Boolean(item.flds) });
@@ -617,7 +656,7 @@ async function loadFrameTokenFromAccount() {
   const token = findCustomFieldValue(customFields, ACCOUNT_TOKEN_FIELD);
 
   if (!token) {
-    throw new Error(t("accountTokenMissing"));
+    throw publicDisplayError("accountTokenMissing", "Required account custom field is missing or empty.");
   }
 
   logDebug("Frame token found in account custom fields");
@@ -640,18 +679,18 @@ async function fetchDevices(token) {
   try {
     payload = await response.json();
   } catch (_err) {
-    throw new Error(t("vehicleListJsonError"));
+    throw new Error(tEnglish("vehicleListJsonError"));
   }
 
   if (!response.ok) {
     const detail = extractApiError(payload) || response.statusText || `HTTP ${response.status}`;
     logDebug("Vehicle list API request failed", { status: response.status, detail });
-    throw new Error(t("vehicleListLoadError"));
+    throw publicDisplayError("vehicleListLoadError", detail);
   }
 
   if (payload && Array.isArray(payload.errors) && payload.errors.length > 0) {
     logDebug("Vehicle list API returned errors", { detail: extractApiError(payload) });
-    throw new Error(t("vehicleListLoadError"));
+    throw publicDisplayError("vehicleListLoadError", extractApiError(payload) || "Vehicle list API returned errors.");
   }
 
   const result = payload && Array.isArray(payload.result) ? payload.result : [];
@@ -842,7 +881,7 @@ function loadHubFrame(deviceId, options = {}) {
 
   const iframe = document.getElementById("tachohub");
   if (!iframe) {
-    throw new Error(t("missingMainFrame"));
+    throw new Error(tEnglish("missingMainFrame"));
   }
 
   if (options.forceReload) {
@@ -883,7 +922,7 @@ async function loadApplication() {
 
   const initialDeviceId = chooseInitialDevice();
   if (!initialDeviceId) {
-    throw new Error(t("noVehiclesForToken"));
+    throw publicDisplayError("noVehiclesForToken", "The account access token returned an empty vehicle list.");
   }
 
   appState.selectedDeviceId = initialDeviceId;
@@ -1038,8 +1077,11 @@ function updatePanelToggleText() {
   if (!panelToggle || !shell) return;
 
   const isHidden = shell.classList.contains("nav-hidden");
+  const panel = document.getElementById("vehicle-panel");
+
   panelToggle.textContent = isHidden ? t("showVehicles") : t("hideVehicles");
   panelToggle.setAttribute("aria-expanded", isHidden ? "false" : "true");
+  if (panel) panel.setAttribute("aria-hidden", isHidden ? "true" : "false");
 }
 
 function toggleTheme() {
@@ -1150,5 +1192,5 @@ async function main() {
 
 main().catch((err) => {
   console.error(err);
-  fail(err && err.message ? err.message : t("appLoadError"));
+  fail(err instanceof Error ? err : new Error(tEnglish("appLoadError")));
 });
