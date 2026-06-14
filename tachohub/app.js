@@ -1,6 +1,6 @@
 "use strict";
 
-const APP_DNS = "Acron Tacho Hub";
+const APP_NAME = "Acron Tacho Hub";
 const ACCOUNT_TOKEN_FIELD = "tachohub_token";
 const LOGIN_TOKEN_STORAGE_KEY = "wwt";
 const THEME_STORAGE_KEY = "ath_theme";
@@ -8,7 +8,7 @@ const SELECTED_DEVICE_STORAGE_KEY = "ath_selected_device_id";
 
 const DEFAULT_API_URL = "https://hst-api.wialon.com";
 const DEFAULT_HOST_URL = "https://hosting.wialon.com";
-const DEFAULT_FRAME_LANG = "ro-RO";
+const DEFAULT_FRAME_LANG = "en-US";
 const DEFAULT_FRAME_THEME = "dark";
 const FRAME_BASE_URL = "https://tachobox.flespi.io";
 const DEVICE_LIST_URL = "https://flespi.io/gw/devices/all?fields=id,name,configuration.ident,connected";
@@ -18,22 +18,122 @@ const LOGIN_RESPONSE_FLAGS = 1;
 const LOGIN_ACCESS_TYPE = 256;
 const LOGIN_ACTIVATION_TIME = 0;
 const LOGIN_TOKEN_DURATION = 0;
+const FRAME_LOADING_FALLBACK_MS = 15000;
 const THEMES = new Set(["dark", "light"]);
+const SUPPORTED_UI_LANGS = new Set(["en", "ro"]);
 
 const queryParams = new URLSearchParams(window.location.search);
-const hashParams = new URLSearchParams(window.location.hash.replace(/^#\??/, ""));
 let sdkLoadPromise = null;
 let loginMessageHandler = null;
 
 const appState = {
   apiBaseUrl: "",
   frameToken: "",
-  lang: DEFAULT_FRAME_LANG,
+  uiLang: "en",
+  frameLang: DEFAULT_FRAME_LANG,
   theme: DEFAULT_FRAME_THEME,
   devices: [],
   selectedDeviceId: "",
+  currentFrameDeviceId: "",
   searchText: "",
-  frameReloadCounter: 0
+  isLoginVisible: false,
+  frameLoadGeneration: 0,
+  frameReloadNonce: 0,
+  frameLoadingFallbackTimerId: 0,
+  statusKind: ""
+};
+
+const TEXT = {
+  en: {
+    appTitle: APP_NAME,
+    loadingSdk: "Loading SDK...",
+    initializingSession: "Initializing session...",
+    loadingAccountSettings: "Loading account settings...",
+    loadingVehicles: "Loading vehicles...",
+    loadingFrame: "Loading vehicle data...",
+    loggingIn: "Logging in...",
+    loginRequired: "Please log in to continue.",
+    loginFailed: "Login failed.",
+    appLoadError: "Application loading error.",
+    sdkLoadFailed: "Failed to load required SDK script: {src}",
+    remoteApiError: "Remote API error {code}",
+    missingSdk: "The required SDK did not load.",
+    missingRemoteWrapper: "The Remote API wrapper is not available.",
+    loginRequiredGeneric: "Login is required.",
+    tokenLoginFailed: "Token login failed.",
+    sessionLoginFailed: "Session login failed.",
+    accountIdError: "Can't determine the account ID of the current user.",
+    accountLoadError: "Could not load current account/resource.",
+    accountTokenMissing: "Tacho Hub not active for this account.",
+    vehicleListJsonError: "Vehicle list response was not valid JSON.",
+    vehicleListLoadError: "Tacho Hub access expired or is invalid.",
+    noVehiclesForToken: "No vehicles are available for this account on Tacho Hub.",
+    technicalError: "Technical error.",
+    missingMainFrame: "Missing main iframe element.",
+    hideVehicles: "Hide vehicles",
+    showVehicles: "Show vehicles",
+    searchVehicles: "Search vehicles...",
+    reloadApp: "Reload app",
+    switchToDark: "Dark",
+    switchToLight: "Light",
+    switchThemeToDark: "Switch to dark theme",
+    switchThemeToLight: "Switch to light theme",
+    noVehiclesFound: "No vehicles found.",
+    noMatchingVehicles: "No matching vehicles.",
+    vehicleCount: "{count} vehicles",
+    vehicleCountFiltered: "{shown} of {total} vehicles",
+    deviceLabel: "ID {id}",
+    online: "online",
+    offline: "offline",
+    defaultDeviceName: "Device {id}",
+    mainFrameTitle: `${APP_NAME} content`,
+    loginFrameTitle: "Login"
+  },
+  ro: {
+    appTitle: APP_NAME,
+    loadingSdk: "Se încarcă SDK-ul...",
+    initializingSession: "Se inițializează sesiunea...",
+    loadingAccountSettings: "Se încarcă setările contului...",
+    loadingVehicles: "Se încarcă vehiculele...",
+    loadingFrame: "Se încarcă datele vehiculului...",
+    loggingIn: "Se face autentificarea...",
+    loginRequired: "Autentifică-te pentru a continua.",
+    loginFailed: "Autentificarea a eșuat.",
+    appLoadError: "Eroare la încărcarea aplicației.",
+    sdkLoadFailed: "Nu s-a putut încărca scriptul SDK necesar: {src}",
+    remoteApiError: "Eroare Remote API {code}",
+    missingSdk: "SDK-ul necesar nu s-a încărcat.",
+    missingRemoteWrapper: "Interfața Remote API nu este disponibilă.",
+    loginRequiredGeneric: "Autentificarea este necesară.",
+    tokenLoginFailed: "Autentificarea cu token a eșuat.",
+    sessionLoginFailed: "Autentificarea cu sesiunea existentă a eșuat.",
+    accountIdError: "Nu se poate determina ID-ul contului utilizatorului curent.",
+    accountLoadError: "Nu s-a putut încărca resursa/contul curent.",
+    accountTokenMissing: "Tacho Hub nu este activ pentru acest cont.",
+    vehicleListJsonError: "Răspunsul listei de vehicule nu este JSON valid.",
+    vehicleListLoadError: "Accesul Tacho Hub a expirat sau nu este valid.",
+    noVehiclesForToken: "Nu există vehicule disponibile pentru acest cont în Tacho Hub.",
+    technicalError: "Eroare tehnică.",
+    missingMainFrame: "Elementul iframe principal lipsește.",
+    hideVehicles: "Ascunde vehiculele",
+    showVehicles: "Afișează vehiculele",
+    searchVehicles: "Caută vehicule...",
+    reloadApp: "Reîncarcă aplicația",
+    switchToDark: "Întunecat",
+    switchToLight: "Luminos",
+    switchThemeToDark: "Schimbă la tema întunecată",
+    switchThemeToLight: "Schimbă la tema luminoasă",
+    noVehiclesFound: "Nu s-au găsit vehicule.",
+    noMatchingVehicles: "Nu există vehicule care corespund căutării.",
+    vehicleCount: "{count} vehicule",
+    vehicleCountFiltered: "{shown} din {total} vehicule",
+    deviceLabel: "ID {id}",
+    online: "online",
+    offline: "offline",
+    defaultDeviceName: "Dispozitiv {id}",
+    mainFrameTitle: `Conținut ${APP_NAME}`,
+    loginFrameTitle: "Autentificare"
+  }
 };
 
 class AuthRequiredError extends Error {
@@ -43,45 +143,85 @@ class AuthRequiredError extends Error {
   }
 }
 
-class UserFacingError extends Error {
-  constructor(userMessageKey, technicalMessage) {
-    super(technicalMessage || userMessageKey);
-    this.name = "UserFacingError";
-    this.userMessageKey = userMessageKey;
+class PublicDisplayError extends Error {
+  constructor(messageKey, technicalMessage = "") {
+    super(tEnglish(messageKey));
+    this.name = "PublicDisplayError";
+    this.messageKey = messageKey;
+    this.technicalMessage = technicalMessage || tEnglish(messageKey);
   }
 }
 
-const VISIBLE_ERROR_MESSAGES = Object.freeze({
-  inactive: "Tacho Hub not active for this account.",
-  invalidAccess: "Tacho Hub access expired or is invalid.",
-  noVehicles: "No vehicles are available for this account on Tacho Hub.",
-  technical: "Technical error."
-});
-
-function getVisibleErrorMessage(error) {
-  if (error instanceof UserFacingError && VISIBLE_ERROR_MESSAGES[error.userMessageKey]) {
-    return VISIBLE_ERROR_MESSAGES[error.userMessageKey];
-  }
-
-  return VISIBLE_ERROR_MESSAGES.technical;
+function formatText(template, values = {}) {
+  return String(template || "").replace(/\{([a-zA-Z0-9_]+)\}/g, (_match, name) => (
+    Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : ""
+  ));
 }
 
-function setStatus(message, isError = false) {
-  if (!isError) {
-    logDebug("Status", { message });
+function t(key, values = {}) {
+  const dictionary = TEXT[appState.uiLang] || TEXT.en;
+  return formatText(dictionary[key] || TEXT.en[key] || key, values);
+}
+
+function tEnglish(key, values = {}) {
+  return formatText(TEXT.en[key] || key, values);
+}
+
+function publicDisplayError(messageKey, technicalMessage = "") {
+  return new PublicDisplayError(messageKey, technicalMessage);
+}
+
+function getUserFacingErrorMessage(error) {
+  if (error instanceof PublicDisplayError && error.messageKey) {
+    return t(error.messageKey);
+  }
+
+  return t("technicalError");
+}
+
+function getTechnicalErrorMessage(error) {
+  if (error instanceof PublicDisplayError) {
+    return error.technicalMessage || error.message || error.name;
+  }
+
+  if (error instanceof Error) {
+    return error.message || error.name;
+  }
+
+  return String(error || "Unknown error");
+}
+
+function setStatus(message, isError = false, _showContent = false, kind = "") {
+  const status = document.getElementById("status");
+  const text = String(message || "");
+
+  appState.statusKind = text ? (kind || (isError ? "error" : "status")) : "";
+
+  if (!status) {
+    if (text && !isError) logDebug("Status", { message: text });
     return;
   }
 
-  const status = document.getElementById("status");
-  if (!status) return;
+  if (!isError) {
+    status.textContent = "";
+    status.classList.remove("error");
+    status.style.display = "none";
+    if (text) logDebug("Status", { message: text, kind: appState.statusKind });
+    return;
+  }
 
-  status.textContent = message;
-  status.classList.toggle("error", true);
-  status.style.display = "flex";
+  status.textContent = text;
+  status.classList.add("error");
+  status.style.display = text ? "flex" : "none";
 }
 
-function hideStatus() {
+function hideStatus(kind = "") {
+  if (kind && appState.statusKind !== kind) return;
+
   const status = document.getElementById("status");
+
+  appState.statusKind = "";
+
   if (status) {
     status.textContent = "";
     status.classList.remove("error");
@@ -89,22 +229,57 @@ function hideStatus() {
   }
 }
 
+function clearFrameLoadingFallback() {
+  if (!appState.frameLoadingFallbackTimerId) return;
+
+  window.clearTimeout(appState.frameLoadingFallbackTimerId);
+  appState.frameLoadingFallbackTimerId = 0;
+}
+
+function clearFrameLoadingStatus(generation, reason) {
+  if (appState.frameLoadGeneration !== generation) return;
+
+  clearFrameLoadingFallback();
+  hideStatus("frame-loading");
+  logDebug("Frame loading status cleared", { generation, reason });
+}
+
+function scheduleFrameLoadingFallback(generation) {
+  clearFrameLoadingFallback();
+
+  appState.frameLoadingFallbackTimerId = window.setTimeout(() => {
+    if (appState.frameLoadGeneration !== generation) return;
+
+    appState.frameLoadingFallbackTimerId = 0;
+    hideStatus("frame-loading");
+    logDebug("Frame loading status cleared by fallback", { generation });
+  }, FRAME_LOADING_FALLBACK_MS);
+}
+
 function fail(error) {
   hideLoginPanel();
-  logDebug("Visible error", {
-    visibleMessage: getVisibleErrorMessage(error),
-    technicalMessage: error && error.message ? error.message : String(error || "")
+  logDebug("User-facing error", {
+    displayMessage: getUserFacingErrorMessage(error),
+    technicalMessage: getTechnicalErrorMessage(error)
   });
-  setStatus(getVisibleErrorMessage(error), true);
+  setStatus(getUserFacingErrorMessage(error), true, true);
 }
 
 function logDebug(label, details) {
-  if (!window.console || typeof console.info !== "function") return;
-  console.info(`[Acron Tacho Hub] ${label}`, details || "");
+  if (!window.console) return;
+
+  const write = typeof console.debug === "function"
+    ? console.debug.bind(console)
+    : typeof console.info === "function"
+      ? console.info.bind(console)
+      : null;
+
+  if (!write) return;
+  write(`[${APP_NAME}] ${label}`, details || "");
 }
 
 function getParam(name) {
-  const value = queryParams.get(name) || hashParams.get(name) || "";
+  const value = queryParams.get(name);
   if (!value || !value.trim()) return "";
   return value.trim();
 }
@@ -151,16 +326,26 @@ function getLaunchUser() {
   return getParam("user");
 }
 
+function getLaunchSid() {
+  return getParam("sid") || getParam("eid");
+}
+
 function getLaunchLanguage() {
   return getParam("lang") || "en";
 }
 
+function normalizeUiLang(lang) {
+  const language = String(lang || "").trim().toLowerCase().split("-")[0];
+  return SUPPORTED_UI_LANGS.has(language) ? language : "en";
+}
+
 function normalizeFrameLang(lang) {
-  const value = (lang || "").toLowerCase();
+  const value = String(lang || "").trim().toLowerCase();
 
   if (value === "ro" || value === "ro-ro") return "ro-RO";
-  if (value === "en" || value === "en-us") return "en-US";
-  return lang || DEFAULT_FRAME_LANG;
+  if (value === "en" || value === "en-us" || value === "en-gb") return "en-US";
+
+  return DEFAULT_FRAME_LANG;
 }
 
 function isValidTheme(theme) {
@@ -179,7 +364,7 @@ function writeStoredValue(key, value) {
   try {
     if (window.localStorage) window.localStorage.setItem(key, value);
   } catch (_err) {
-    // Storage can be unavailable in hardened browser modes. The session still works until refresh.
+    // Storage can be unavailable in hardened browser modes. The current browser session can still continue.
   }
 }
 
@@ -196,7 +381,7 @@ function getStoredLoginToken() {
 }
 
 function setStoredLoginToken(token) {
-  writeStoredValue(LOGIN_TOKEN_STORAGE_KEY, token.trim());
+  writeStoredValue(LOGIN_TOKEN_STORAGE_KEY, String(token || "").trim());
 }
 
 function clearStoredLoginToken() {
@@ -212,16 +397,22 @@ function setStoredTheme(theme) {
   if (isValidTheme(theme)) writeStoredValue(THEME_STORAGE_KEY, theme);
 }
 
-function getStoredSelectedDeviceId() {
+function getStoredDeviceId() {
   return readStoredValue(SELECTED_DEVICE_STORAGE_KEY).trim();
 }
 
-function setStoredSelectedDeviceId(deviceId) {
-  const cleanDeviceId = String(deviceId || "").trim();
-  if (cleanDeviceId) writeStoredValue(SELECTED_DEVICE_STORAGE_KEY, cleanDeviceId);
+function setStoredDeviceId(deviceId) {
+  const value = String(deviceId || "").trim();
+
+  if (value) {
+    writeStoredValue(SELECTED_DEVICE_STORAGE_KEY, value);
+    return;
+  }
+
+  clearStoredDeviceId();
 }
 
-function clearStoredSelectedDeviceId() {
+function clearStoredDeviceId() {
   removeStoredValue(SELECTED_DEVICE_STORAGE_KEY);
 }
 
@@ -234,7 +425,7 @@ function loadScript(src) {
     script.charset = "UTF-8";
 
     script.onload = () => resolve();
-    script.onerror = () => reject(new Error(`Failed to load required SDK script: ${src}`));
+    script.onerror = () => reject(new Error(tEnglish("sdkLoadFailed", { src })));
 
     document.head.appendChild(script);
   });
@@ -264,7 +455,7 @@ function getPlatformErrorText(code) {
     return wialon.core.Errors.getErrorText(code);
   }
 
-  return `Remote API error ${code}`;
+  return tEnglish("remoteApiError", { code });
 }
 
 function isSessionErrorCode(code) {
@@ -273,7 +464,7 @@ function isSessionErrorCode(code) {
 
 function getSession() {
   if (!window.wialon || !wialon.core || !wialon.core.Session) {
-    throw new Error("The required SDK did not load.");
+    throw new Error(tEnglish("missingSdk"));
   }
 
   return wialon.core.Session.getInstance();
@@ -281,7 +472,7 @@ function getSession() {
 
 function getRemote() {
   if (!window.wialon || !wialon.core || !wialon.core.Remote) {
-    throw new Error("The Remote API wrapper is not available.");
+    throw new Error(tEnglish("missingRemoteWrapper"));
   }
 
   return wialon.core.Remote.getInstance();
@@ -294,10 +485,10 @@ function initSession(baseUrl) {
 
 function loginWithToken(token) {
   return new Promise((resolve, reject) => {
-    const cleanToken = (token || "").trim();
+    const cleanToken = String(token || "").trim();
 
     if (!cleanToken) {
-      reject(new AuthRequiredError("Login is required."));
+      reject(new AuthRequiredError(t("loginRequiredGeneric")));
       return;
     }
 
@@ -306,7 +497,7 @@ function loginWithToken(token) {
     getSession().loginToken(cleanToken, "", (code) => {
       if (code) {
         logDebug("Token login failed", { code, error: getPlatformErrorText(code) });
-        reject(new AuthRequiredError(`${getPlatformErrorText(code)} during token login.`));
+        reject(new AuthRequiredError(`${t("tokenLoginFailed")}: ${getPlatformErrorText(code)}`));
         return;
       }
 
@@ -316,87 +507,52 @@ function loginWithToken(token) {
   });
 }
 
-async function authenticateWithStoredToken(baseUrl) {
-  initSession(baseUrl);
-
-  const token = getStoredLoginToken();
-  if (!token) {
-    throw new AuthRequiredError("No stored login token is available.");
-  }
-
-  try {
-    await loginWithToken(token);
-  } catch (err) {
-    clearStoredLoginToken();
-    throw err;
-  }
-}
-
-function getLaunchSessionId() {
-  return getParam("sid") || getParam("eid") || getParam("SID") || getParam("EID");
-}
-
-function cloneLaunchSession(sessionId, user) {
+function loginWithLaunchSession(sid) {
   return new Promise((resolve, reject) => {
-    const cleanSessionId = (sessionId || "").trim();
-
-    if (!cleanSessionId) {
-      reject(new AuthRequiredError("No launch session is available."));
-      return;
-    }
-
+    const cleanSid = String(sid || "").trim();
     const session = getSession();
-    if (typeof session.duplicate !== "function") {
-      reject(new Error("The session cloning method is not available."));
+
+    if (!cleanSid || typeof session.duplicate !== "function") {
+      reject(new AuthRequiredError(t("loginRequired")));
       return;
     }
 
-    logDebug("Trying launch session clone", {
-      hasLaunchSession: Boolean(cleanSessionId),
-      user: user || ""
-    });
+    logDebug("Trying launch session duplicate", { hasSid: Boolean(cleanSid), hasUser: Boolean(getLaunchUser()) });
 
-    session.duplicate(cleanSessionId, user || "", true, (code) => {
+    session.duplicate(cleanSid, getLaunchUser() || "", true, (code) => {
       if (code) {
-        logDebug("Launch session clone failed", { code, error: getPlatformErrorText(code) });
-        reject(new AuthRequiredError(`${getPlatformErrorText(code)} during launch session clone.`));
+        logDebug("Launch session duplicate failed", { code, error: getPlatformErrorText(code) });
+        reject(new AuthRequiredError(`${t("sessionLoginFailed")}: ${getPlatformErrorText(code)}`));
         return;
       }
 
-      logDebug("Launch session clone succeeded");
+      logDebug("Launch session duplicate succeeded");
       resolve();
     });
   });
 }
 
-async function authenticateWithLaunchSession(baseUrl) {
+async function authenticate(baseUrl) {
   initSession(baseUrl);
 
-  const launchSessionId = getLaunchSessionId();
-  if (!launchSessionId) {
-    throw new AuthRequiredError("No launch session was provided.");
-  }
-
-  await cloneLaunchSession(launchSessionId, getLaunchUser());
-}
-
-async function authenticate(baseUrl) {
-  if (getStoredLoginToken()) {
+  const token = getStoredLoginToken();
+  if (token) {
     try {
-      await authenticateWithStoredToken(baseUrl);
+      await loginWithToken(token);
       return;
     } catch (err) {
-      if (!(err instanceof AuthRequiredError)) {
-        throw err;
-      }
-
-      logDebug("Stored token was not usable; trying launch session", {
-        error: err.message || String(err)
-      });
+      clearStoredLoginToken();
+      logDebug("Stored token could not be used; falling back to launch session", { message: err.message });
     }
   }
 
-  await authenticateWithLaunchSession(baseUrl);
+  const launchSid = getLaunchSid();
+  if (launchSid) {
+    await loginWithLaunchSession(launchSid);
+    return;
+  }
+
+  throw new AuthRequiredError(t("loginRequired"));
 }
 
 function apiCall(svc, callParams) {
@@ -455,7 +611,7 @@ async function getCurrentAccountId() {
   const accountId = sessionInfo && sessionInfo.user && sessionInfo.user.bact;
 
   if (!accountId) {
-    throw new Error("Can't determine the account ID of the current user.");
+    throw new Error(tEnglish("accountIdError"));
   }
 
   logDebug("Account ID read from session metadata", { accountId });
@@ -473,13 +629,10 @@ async function getAccountCustomFields(accountId) {
   const item = response && response.item;
 
   if (!item) {
-    throw new Error("Could not load current account/resource.");
+    throw new Error(tEnglish("accountLoadError"));
   }
 
-  logDebug("Account custom fields loaded", {
-    hasFields: Boolean(item.flds)
-  });
-
+  logDebug("Account custom fields loaded", { hasFields: Boolean(item.flds) });
   return item.flds || null;
 }
 
@@ -503,10 +656,7 @@ async function loadFrameTokenFromAccount() {
   const token = findCustomFieldValue(customFields, ACCOUNT_TOKEN_FIELD);
 
   if (!token) {
-    throw new UserFacingError(
-      "inactive",
-      `Could not find custom field '${ACCOUNT_TOKEN_FIELD}' on this account/resource.`
-    );
+    throw publicDisplayError("accountTokenMissing", "Required account custom field is missing or empty.");
   }
 
   logDebug("Frame token found in account custom fields");
@@ -529,16 +679,18 @@ async function fetchDevices(token) {
   try {
     payload = await response.json();
   } catch (_err) {
-    throw new Error("Vehicle list response was not valid JSON.");
+    throw new Error(tEnglish("vehicleListJsonError"));
   }
 
   if (!response.ok) {
     const detail = extractApiError(payload) || response.statusText || `HTTP ${response.status}`;
-    throw new UserFacingError("invalidAccess", `Could not load vehicles: ${detail}`);
+    logDebug("Vehicle list API request failed", { status: response.status, detail });
+    throw publicDisplayError("vehicleListLoadError", detail);
   }
 
   if (payload && Array.isArray(payload.errors) && payload.errors.length > 0) {
-    throw new UserFacingError("invalidAccess", `Could not load vehicles: ${extractApiError(payload)}`);
+    logDebug("Vehicle list API returned errors", { detail: extractApiError(payload) });
+    throw publicDisplayError("vehicleListLoadError", extractApiError(payload) || "Vehicle list API returned errors.");
   }
 
   const result = payload && Array.isArray(payload.result) ? payload.result : [];
@@ -573,7 +725,7 @@ function normalizeDevices(items) {
       ? item.configuration
       : {};
     const ident = configuration.ident || item["configuration.ident"] || "";
-    const name = String(item.name || ident || `Device ${id}`);
+    const name = String(item.name || ident || t("defaultDeviceName", { id }));
 
     devices.push({
       id,
@@ -607,19 +759,19 @@ function renderVehicleList() {
   list.textContent = "";
 
   if (!appState.devices.length) {
-    count.textContent = "No vehicles found.";
+    count.textContent = t("noVehiclesFound");
     return;
   }
 
   count.textContent = appState.searchText.trim()
-    ? `${filtered.length} of ${appState.devices.length} vehicles`
-    : `${appState.devices.length} vehicles`;
+    ? t("vehicleCountFiltered", { shown: filtered.length, total: appState.devices.length })
+    : t("vehicleCount", { count: appState.devices.length });
 
   if (!filtered.length) {
     const empty = document.createElement("div");
     empty.className = "vehicle-meta";
     empty.style.padding = "10px";
-    empty.textContent = "No matching vehicles.";
+    empty.textContent = t("noMatchingVehicles");
     list.appendChild(empty);
     return;
   }
@@ -655,9 +807,9 @@ function renderVehicleList() {
 }
 
 function getVehicleMeta(vehicle) {
-  const parts = [`ID ${vehicle.id}`];
+  const parts = [t("deviceLabel", { id: vehicle.id })];
   if (vehicle.ident) parts.push(vehicle.ident);
-  parts.push(vehicle.connected ? "online" : "offline");
+  parts.push(vehicle.connected ? t("online") : t("offline"));
   return parts.join(" · ");
 }
 
@@ -665,101 +817,135 @@ function selectVehicle(deviceId) {
   const selected = appState.devices.find((vehicle) => vehicle.id === String(deviceId));
   if (!selected) return;
 
+  const shouldForceReload = selected.id === appState.currentFrameDeviceId;
+
   appState.selectedDeviceId = selected.id;
-  setStoredSelectedDeviceId(selected.id);
+  setStoredDeviceId(selected.id);
   renderVehicleList();
-  loadHubFrame(selected.id);
+  loadHubFrame(selected.id, { forceReload: shouldForceReload, showLoading: true });
+}
+
+function findDeviceById(deviceId) {
+  const cleanDeviceId = String(deviceId || "").trim();
+  if (!cleanDeviceId) return null;
+
+  return appState.devices.find((vehicle) => vehicle.id === cleanDeviceId) || null;
 }
 
 function chooseInitialDevice() {
-  const storedDeviceId = getStoredSelectedDeviceId();
-  if (storedDeviceId && appState.devices.some((vehicle) => vehicle.id === storedDeviceId)) {
-    return storedDeviceId;
+  const storedDeviceId = getStoredDeviceId();
+  const storedDevice = findDeviceById(storedDeviceId);
+
+  if (storedDevice) {
+    return storedDevice.id;
   }
 
   if (storedDeviceId) {
-    clearStoredSelectedDeviceId();
-  }
-
-  const requestedDeviceId = getParam("deviceId");
-  if (requestedDeviceId && appState.devices.some((vehicle) => vehicle.id === requestedDeviceId)) {
-    return requestedDeviceId;
+    clearStoredDeviceId();
   }
 
   return appState.devices.length ? appState.devices[0].id : "";
 }
 
-function buildFrameUrl(deviceId, token, lang, theme, reloadNonce) {
-  const query = new URLSearchParams();
+function buildFrameUrl(deviceId, token, lang, theme, reloadNonce = "") {
+  const safeTheme = isValidTheme(theme) ? theme : DEFAULT_FRAME_THEME;
+  const safeLang = normalizeFrameLang(lang);
+  const pageQuery = new URLSearchParams();
+  const routeQuery = new URLSearchParams();
 
-  query.set("token", token);
-  query.set("hidepanels", "1");
-  query.set("whitelabel", "true");
-  query.set("hidedisclaimer", "true");
-  query.set("theme", isValidTheme(theme) ? theme : DEFAULT_FRAME_THEME);
-  query.set("lang", normalizeFrameLang(lang));
-  if (reloadNonce) query.set("reload", reloadNonce);
+  pageQuery.set("theme", safeTheme);
+  pageQuery.set("lang", safeLang);
 
-  return `${FRAME_BASE_URL}/#/device/${encodeURIComponent(deviceId)}?${query.toString()}`;
+  routeQuery.set("token", token);
+  routeQuery.set("hidepanels", "1");
+  routeQuery.set("whitelabel", "true");
+  routeQuery.set("hidedisclaimer", "true");
+  routeQuery.set("theme", safeTheme);
+  routeQuery.set("lang", safeLang);
+
+  if (reloadNonce) {
+    pageQuery.set("reload", String(reloadNonce));
+    routeQuery.set("reload", String(reloadNonce));
+  }
+
+  return `${FRAME_BASE_URL}/?${pageQuery.toString()}#/device/${encodeURIComponent(deviceId)}?${routeQuery.toString()}`;
 }
 
-function loadHubFrame(deviceId) {
-  if (!deviceId) return;
+function loadHubFrame(deviceId, options = {}) {
+  const cleanDeviceId = String(deviceId || "").trim();
+  if (!cleanDeviceId) return;
+
+  const selectedDevice = findDeviceById(cleanDeviceId);
+  if (!selectedDevice) {
+    clearStoredDeviceId();
+    return;
+  }
 
   const iframe = document.getElementById("tachohub");
   if (!iframe) {
-    throw new Error("Missing main iframe element.");
+    throw new Error(tEnglish("missingMainFrame"));
   }
 
-  appState.frameReloadCounter += 1;
-  const reloadNonce = `${Date.now()}-${appState.frameReloadCounter}`;
+  if (options.forceReload) {
+    appState.frameReloadNonce += 1;
+  }
 
-  iframe.src = buildFrameUrl(deviceId, appState.frameToken, appState.lang, appState.theme, reloadNonce);
+  const url = buildFrameUrl(
+    selectedDevice.id,
+    appState.frameToken,
+    appState.frameLang,
+    appState.theme,
+    options.forceReload ? appState.frameReloadNonce : ""
+  );
+  const generation = appState.frameLoadGeneration + 1;
+
+  appState.frameLoadGeneration = generation;
+  appState.currentFrameDeviceId = selectedDevice.id;
+
+  if (options.showLoading) {
+    setStatus(tEnglish("loadingFrame"), false, false, "frame-loading");
+    scheduleFrameLoadingFallback(generation);
+  } else {
+    clearFrameLoadingFallback();
+  }
+
   iframe.style.display = "block";
-  hideStatus();
+  iframe.addEventListener("load", () => clearFrameLoadingStatus(generation, "load"), { once: true });
+  iframe.src = url;
 }
 
 async function loadApplication() {
-  setStatus("Loading account settings...");
-
-  appState.lang = normalizeFrameLang(getLaunchLanguage() || DEFAULT_FRAME_LANG);
-  document.documentElement.lang = appState.lang;
-  appState.theme = getStoredTheme();
-  applyTheme(appState.theme);
+  setStatus(tEnglish("loadingAccountSettings"));
 
   appState.frameToken = await loadFrameTokenFromAccount();
 
-  setStatus("Loading vehicles...");
+  setStatus(tEnglish("loadingVehicles"));
   appState.devices = await fetchDevices(appState.frameToken);
-  renderVehicleList();
 
   const initialDeviceId = chooseInitialDevice();
   if (!initialDeviceId) {
-    throw new UserFacingError("noVehicles", "No vehicles are available for this account token.");
+    throw publicDisplayError("noVehiclesForToken", "The account access token returned an empty vehicle list.");
   }
 
-  if (appState.devices.some((vehicle) => vehicle.id === initialDeviceId)) {
-    appState.selectedDeviceId = initialDeviceId;
-    setStoredSelectedDeviceId(initialDeviceId);
-    renderVehicleList();
-  }
-
-  loadHubFrame(initialDeviceId);
+  appState.selectedDeviceId = initialDeviceId;
+  setStoredDeviceId(initialDeviceId);
+  renderVehicleList();
   hideLoginPanel();
+  loadHubFrame(initialDeviceId, { showLoading: true });
 }
 
 function buildLoginUrl() {
   const loginHost = getLoginHostUrl();
   const loginUrl = new URL(`${loginHost}/login.html`);
 
-  loginUrl.searchParams.set("client_id", APP_DNS);
+  loginUrl.searchParams.set("client_id", APP_NAME);
   loginUrl.searchParams.set("access_type", String(LOGIN_ACCESS_TYPE));
   loginUrl.searchParams.set("activation_time", String(LOGIN_ACTIVATION_TIME));
   loginUrl.searchParams.set("duration", String(LOGIN_TOKEN_DURATION));
   loginUrl.searchParams.set("flags", String(LOGIN_RESPONSE_FLAGS));
   loginUrl.searchParams.set("response_type", "token");
   loginUrl.searchParams.set("redirect_uri", `${loginHost}/post_token.html`);
-  loginUrl.searchParams.set("lang", getLaunchLanguage());
+  loginUrl.searchParams.set("lang", appState.uiLang);
 
   const user = getLaunchUser();
   if (user) loginUrl.searchParams.set("user", user);
@@ -812,24 +998,25 @@ function parseTokenParams(rawParams) {
 }
 
 function showLoginPanel(reason) {
-  const loginPanel = document.getElementById("login-view");
+  const loginView = document.getElementById("login-view");
   const loginFrame = document.getElementById("login-frame");
   const loginUrl = buildLoginUrl();
   const allowedOrigin = new URL(getLoginHostUrl()).origin;
+  const message = reason || t("loginRequired");
 
-  logDebug("Showing login panel", {
-    reason,
-    loginHost: getLoginHostUrl()
-  });
+  logDebug("Showing login view", { loginHost: getLoginHostUrl() });
 
-  if (!loginPanel || !loginFrame) {
-    fail(new Error(reason || "Login is required."));
+  if (!loginView || !loginFrame) {
+    fail(message);
     return;
   }
 
-  hideStatus();
+  appState.isLoginVisible = true;
   document.body.classList.add("login-active");
-  loginPanel.style.display = "block";
+  setStatus(tEnglish("loginRequired"));
+  logDebug("Login required");
+
+  loginView.style.display = "block";
   loginFrame.src = loginUrl;
 
   if (loginMessageHandler) {
@@ -845,7 +1032,7 @@ function showLoginPanel(reason) {
     logDebug("Received login token from login form");
 
     try {
-      setStatus("Logging in...");
+      setStatus(tEnglish("loggingIn"));
       hideLoginPanel();
       setStoredLoginToken(token);
       initSession(appState.apiBaseUrl || getApiBaseUrl());
@@ -853,11 +1040,7 @@ function showLoginPanel(reason) {
       await loadApplication();
     } catch (err) {
       clearStoredLoginToken();
-      if (err instanceof AuthRequiredError) {
-        showLoginPanel(err.message || "Login failed.");
-      } else {
-        fail(err || new Error("Application loading error."));
-      }
+      showLoginPanel(err && err.message ? err.message : t("loginFailed"));
     }
   };
 
@@ -865,11 +1048,13 @@ function showLoginPanel(reason) {
 }
 
 function hideLoginPanel() {
-  const loginPanel = document.getElementById("login-view");
+  const loginView = document.getElementById("login-view");
   const loginFrame = document.getElementById("login-frame");
 
+  appState.isLoginVisible = false;
   document.body.classList.remove("login-active");
-  if (loginPanel) loginPanel.style.display = "none";
+
+  if (loginView) loginView.style.display = "none";
   if (loginFrame) loginFrame.removeAttribute("src");
 }
 
@@ -881,8 +1066,24 @@ function applyTheme(theme) {
   if (!themeToggle) return;
 
   const nextTheme = safeTheme === "dark" ? "light" : "dark";
-  themeToggle.textContent = nextTheme === "dark" ? "Dark" : "Light";
-  themeToggle.setAttribute("aria-label", `Switch to ${nextTheme} theme`);
+  themeToggle.textContent = nextTheme === "dark" ? t("switchToDark") : t("switchToLight");
+  themeToggle.setAttribute(
+    "aria-label",
+    nextTheme === "dark" ? t("switchThemeToDark") : t("switchThemeToLight")
+  );
+}
+
+function updatePanelToggleText() {
+  const panelToggle = document.getElementById("panel-toggle");
+  const shell = document.getElementById("app-shell");
+  if (!panelToggle || !shell) return;
+
+  const isHidden = shell.classList.contains("nav-hidden");
+  const panel = document.getElementById("vehicle-panel");
+
+  panelToggle.textContent = isHidden ? t("showVehicles") : t("hideVehicles");
+  panelToggle.setAttribute("aria-expanded", isHidden ? "false" : "true");
+  if (panel) panel.setAttribute("aria-hidden", isHidden ? "true" : "false");
 }
 
 function toggleTheme() {
@@ -891,9 +1092,36 @@ function toggleTheme() {
   setStoredTheme(nextTheme);
   applyTheme(nextTheme);
 
-  if (appState.selectedDeviceId && appState.frameToken) {
-    loadHubFrame(appState.selectedDeviceId);
+  const deviceId = appState.currentFrameDeviceId || appState.selectedDeviceId;
+  if (deviceId && appState.frameToken) {
+    loadHubFrame(deviceId, { forceReload: true, showLoading: true });
   }
+}
+
+function applyLocalization() {
+  document.documentElement.lang = appState.uiLang;
+  document.title = t("appTitle");
+
+  const appTitle = document.getElementById("app-title");
+  if (appTitle) appTitle.textContent = t("appTitle");
+
+  const searchInput = document.getElementById("vehicle-search");
+  if (searchInput) searchInput.placeholder = t("searchVehicles");
+
+  const reloadButton = document.getElementById("app-reload");
+  if (reloadButton) {
+    reloadButton.textContent = t("reloadApp");
+    reloadButton.setAttribute("aria-label", t("reloadApp"));
+  }
+
+  const mainFrame = document.getElementById("tachohub");
+  if (mainFrame) mainFrame.setAttribute("title", t("mainFrameTitle"));
+
+  const loginFrame = document.getElementById("login-frame");
+  if (loginFrame) loginFrame.setAttribute("title", t("loginFrameTitle"));
+
+  updatePanelToggleText();
+  applyTheme(appState.theme);
 }
 
 function setupUi() {
@@ -904,11 +1132,9 @@ function setupUi() {
   const reloadButton = document.getElementById("app-reload");
 
   if (panelToggle && shell) {
-    panelToggle.textContent = shell.classList.contains("nav-hidden") ? "Show vehicles" : "Hide vehicles";
     panelToggle.addEventListener("click", () => {
-      const isHidden = shell.classList.toggle("nav-hidden");
-      panelToggle.setAttribute("aria-expanded", isHidden ? "false" : "true");
-      panelToggle.textContent = isHidden ? "Show vehicles" : "Hide vehicles";
+      shell.classList.toggle("nav-hidden");
+      updatePanelToggleText();
     });
   }
 
@@ -926,26 +1152,34 @@ function setupUi() {
   if (reloadButton) {
     reloadButton.addEventListener("click", () => window.location.reload());
   }
+
+  applyLocalization();
 }
 
 async function main() {
-  setupUi();
   appState.apiBaseUrl = getApiBaseUrl();
+  appState.uiLang = normalizeUiLang(getLaunchLanguage());
+  appState.frameLang = normalizeFrameLang(getLaunchLanguage() || DEFAULT_FRAME_LANG);
   appState.theme = getStoredTheme();
+
+  setupUi();
   applyTheme(appState.theme);
 
   logDebug("Starting app", {
     baseUrl: appState.apiBaseUrl,
     hostUrl: getLoginHostUrl(),
-    lang: getLaunchLanguage(),
-    hasDeviceId: Boolean(getParam("deviceId"))
+    uiLang: appState.uiLang,
+    frameLang: appState.frameLang,
+    hasLaunchSid: Boolean(getLaunchSid()),
+    hasStoredToken: Boolean(getStoredLoginToken()),
+    hasStoredDeviceId: Boolean(getStoredDeviceId())
   });
 
-  setStatus("Loading SDK...");
+  setStatus(tEnglish("loadingSdk"));
   await loadPlatformSdk(appState.apiBaseUrl);
 
   try {
-    setStatus("Initializing session...");
+    setStatus(tEnglish("initializingSession"));
     await authenticate(appState.apiBaseUrl);
     await loadApplication();
   } catch (err) {
@@ -959,6 +1193,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("Application loading error", err);
-  fail(err || new Error("Application loading error."));
+  console.error(err);
+  fail(err instanceof Error ? err : new Error(tEnglish("appLoadError")));
 });
