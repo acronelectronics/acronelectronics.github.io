@@ -61,9 +61,9 @@ const TEXT = {
     sessionLoginFailed: "Session login failed.",
     accountIdError: "Can't determine the account ID of the current user.",
     accountLoadError: "Could not load current account/resource.",
-    accountTokenMissing: "Could not find the required account custom field.",
+    accountTokenMissing: "Tacho Hub not active for this account.",
     vehicleListJsonError: "Vehicle list response was not valid JSON.",
-    vehicleListLoadError: "Could not load vehicles: {detail}",
+    vehicleListLoadError: "Tacho Hub access expired or is invalid.",
     noVehiclesForToken: "No vehicles are available for this account token.",
     missingMainFrame: "Missing main iframe element.",
     hideVehicles: "Hide vehicles",
@@ -105,9 +105,9 @@ const TEXT = {
     sessionLoginFailed: "Autentificarea cu sesiunea existentă a eșuat.",
     accountIdError: "Nu se poate determina ID-ul contului utilizatorului curent.",
     accountLoadError: "Nu s-a putut încărca resursa/contul curent.",
-    accountTokenMissing: "Nu s-a găsit câmpul personalizat necesar în cont.",
+    accountTokenMissing: "Tacho Hub nu este activ pentru acest cont.",
     vehicleListJsonError: "Răspunsul listei de vehicule nu este JSON valid.",
-    vehicleListLoadError: "Nu s-au putut încărca vehiculele: {detail}",
+    vehicleListLoadError: "Accesul Tacho Hub a expirat sau nu este valid.",
     noVehiclesForToken: "Nu există vehicule disponibile pentru tokenul acestui cont.",
     missingMainFrame: "Elementul iframe principal lipsește.",
     hideVehicles: "Ascunde vehiculele",
@@ -161,7 +161,7 @@ function setStatus(message, isError = false, showContent = false) {
 
   status.textContent = text;
   status.classList.toggle("error", Boolean(isError));
-  status.style.display = text && (showContent || isError) ? "block" : "none";
+  status.style.display = text && (showContent || isError) ? "flex" : "none";
 }
 
 function hideStatus() {
@@ -596,11 +596,13 @@ async function fetchDevices(token) {
 
   if (!response.ok) {
     const detail = extractApiError(payload) || response.statusText || `HTTP ${response.status}`;
-    throw new Error(t("vehicleListLoadError", { detail }));
+    logDebug("Vehicle list API request failed", { status: response.status, detail });
+    throw new Error(t("vehicleListLoadError"));
   }
 
   if (payload && Array.isArray(payload.errors) && payload.errors.length > 0) {
-    throw new Error(t("vehicleListLoadError", { detail: extractApiError(payload) }));
+    logDebug("Vehicle list API returned errors", { detail: extractApiError(payload) });
+    throw new Error(t("vehicleListLoadError"));
   }
 
   const result = payload && Array.isArray(payload.result) ? payload.result : [];
