@@ -1,118 +1,310 @@
 <!doctype html>
-<html lang="ro">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="referrer" content="strict-origin-when-cross-origin">
-  <title>TachoHub</title>
+  <title>Acron Tacho Hub</title>
   <style>
+    :root {
+      --bg: #101114;
+      --panel: #181a20;
+      --panel-2: #20232b;
+      --border: #2a2d36;
+      --text: #f4f4f5;
+      --muted: #a1a1aa;
+      --accent: #2563eb;
+      --accent-border: #3b82f6;
+      --button-secondary: #242731;
+      --button-secondary-border: #3f4350;
+      --selected: rgba(37, 99, 235, 0.22);
+      --danger: #f87171;
+      --topbar-height: 56px;
+      --sidebar-width: 320px;
+    }
+
+    :root[data-theme="light"] {
+      --bg: #f4f4f5;
+      --panel: #ffffff;
+      --panel-2: #f8fafc;
+      --border: #d4d4d8;
+      --text: #18181b;
+      --muted: #52525b;
+      --button-secondary: #f4f4f5;
+      --button-secondary-border: #d4d4d8;
+      --selected: rgba(37, 99, 235, 0.12);
+      --danger: #b91c1c;
+    }
+
     html,
     body {
       margin: 0;
       width: 100%;
       height: 100%;
-      background: #101114;
-      color: #f4f4f5;
+      background: var(--bg);
+      color: var(--text);
       font-family: Arial, sans-serif;
       overflow: hidden;
     }
 
-    #status {
+    #topbar {
+      box-sizing: border-box;
+      height: var(--topbar-height);
+      padding: 0 12px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      position: relative;
+      z-index: 20;
+    }
+
+    #panel-toggle {
+      flex: 0 0 auto;
+    }
+
+    #app-title {
+      flex: 0 0 auto;
+      font-weight: 700;
+      font-size: 15px;
+      letter-spacing: 0.01em;
+      white-space: nowrap;
+    }
+
+    #topbar-message {
+      flex: 1 1 auto;
+      min-width: 40px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.35;
+      overflow: hidden;
+      text-align: left;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #topbar-message.error {
+      color: var(--danger);
+    }
+
+    #app-shell {
+      height: calc(100vh - var(--topbar-height));
+      display: grid;
+      grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+      background: var(--bg);
+    }
+
+    #app-shell.nav-hidden {
+      grid-template-columns: 0 minmax(0, 1fr);
+    }
+
+    #vehicle-panel {
+      min-width: 0;
+      overflow: hidden;
+      border-right: 1px solid var(--border);
+      background: var(--panel);
+      display: flex;
+      flex-direction: column;
+    }
+
+    #app-shell.nav-hidden #vehicle-panel {
+      border-right: 0;
+      visibility: hidden;
+    }
+
+    #vehicle-panel-header {
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+      background: var(--panel);
+    }
+
+    #vehicle-search {
       box-sizing: border-box;
       width: 100%;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 11px;
+      background: var(--panel-2);
+      color: var(--text);
+      font: inherit;
+      outline: none;
+    }
+
+    #vehicle-search:focus {
+      border-color: var(--accent-border);
+    }
+
+    #vehicle-count {
+      margin-top: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    #vehicle-list {
+      flex: 1 1 auto;
+      overflow: auto;
+      padding: 6px;
+    }
+
+    .vehicle-item {
+      width: 100%;
+      box-sizing: border-box;
+      appearance: none;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      display: block;
+      font: inherit;
+      margin: 2px 0;
+      padding: 9px 10px;
+      text-align: left;
+    }
+
+    .vehicle-item:hover,
+    .vehicle-item:focus {
+      border-color: var(--button-secondary-border);
+      background: var(--panel-2);
+      outline: none;
+    }
+
+    .vehicle-item.selected {
+      border-color: var(--accent-border);
+      background: var(--selected);
+    }
+
+    .vehicle-name {
+      display: block;
+      font-size: 14px;
+      line-height: 1.3;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .vehicle-meta {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.3;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    #content {
+      min-width: 0;
+      min-height: 0;
+      position: relative;
+      background: var(--bg);
+    }
+
+    #status {
+      box-sizing: border-box;
+      display: none;
+      width: min(640px, calc(100% - 32px));
+      max-height: calc(100% - 32px);
+      overflow: auto;
+      margin: 16px auto;
       padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
       font-size: 14px;
       line-height: 1.4;
-      color: #f4f4f5;
-      background: #181a20;
+      color: var(--text);
+      background: var(--panel);
       white-space: pre-wrap;
+    }
+
+    #status.error {
+      color: var(--danger);
     }
 
     #tachohub {
       width: 100%;
-      height: 100vh;
+      height: 100%;
       border: 0;
       display: none;
-      background: #101114;
+      background: var(--bg);
     }
 
-    #login-panel {
+    #login-view {
       position: fixed;
-      inset: 0;
+      left: 0;
+      right: 0;
+      top: var(--topbar-height);
+      bottom: 0;
       display: none;
-      background: #101114;
+      background: var(--bg);
       z-index: 10;
     }
 
-    #login-header {
-      box-sizing: border-box;
-      min-height: 56px;
-      padding: 12px 16px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 16px;
-      background: #181a20;
-      border-bottom: 1px solid #2a2d36;
-    }
-
-    #login-title {
-      font-size: 14px;
-      line-height: 1.35;
-      color: #f4f4f5;
-    }
-
-    #login-actions {
-      display: flex;
-      gap: 8px;
-      flex: 0 0 auto;
+    #login-frame {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      background: #fff;
     }
 
     .button {
       appearance: none;
-      border: 1px solid #3b82f6;
-      border-radius: 6px;
-      background: #2563eb;
+      border: 1px solid var(--accent-border);
+      border-radius: 7px;
+      background: var(--accent);
       color: #fff;
+      cursor: pointer;
       font: inherit;
       font-size: 13px;
       line-height: 1;
       padding: 9px 12px;
-      cursor: pointer;
+      white-space: nowrap;
     }
 
     .button.secondary {
-      border-color: #3f4350;
-      background: #242731;
+      border-color: var(--button-secondary-border);
+      background: var(--button-secondary);
+      color: var(--text);
     }
 
-    #wialon-login {
-      width: 100%;
-      height: calc(100vh - 56px);
-      border: 0;
-      background: #fff;
+    .button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
     }
   </style>
 </head>
 <body>
-  <div id="status">Loading TachoHub...</div>
+  <header id="topbar">
+    <button class="button secondary" id="panel-toggle" type="button" aria-controls="vehicle-panel" aria-expanded="true"></button>
+    <div id="app-title">Acron Tacho Hub</div>
+    <div id="topbar-message" role="status" aria-live="polite"></div>
+    <button class="button secondary" id="theme-toggle" type="button"></button>
+    <button class="button secondary" id="app-reload" type="button"></button>
+  </header>
 
-  <iframe
-    id="tachohub"
-    title="TachoHub"
-    referrerpolicy="no-referrer"
-    allow="fullscreen">
-  </iframe>
-
-  <section id="login-panel" aria-label="Wialon login">
-    <header id="login-header">
-      <div id="login-title">Please log in to Wialon to continue.</div>
-      <div id="login-actions">
-        <button class="button secondary" id="reload-app" type="button">Reload app</button>
-        <button class="button" id="open-login" type="button">Open login</button>
+  <div id="app-shell">
+    <aside id="vehicle-panel">
+      <div id="vehicle-panel-header">
+        <input id="vehicle-search" type="search" autocomplete="off">
+        <div id="vehicle-count"></div>
       </div>
-    </header>
-    <iframe id="wialon-login" title="Wialon login"></iframe>
+      <div id="vehicle-list" role="listbox"></div>
+    </aside>
+
+    <main id="content">
+      <div id="status"></div>
+      <iframe
+        id="tachohub"
+        referrerpolicy="no-referrer"
+        allow="fullscreen">
+      </iframe>
+    </main>
+  </div>
+
+  <section id="login-view">
+    <iframe id="login-frame"></iframe>
   </section>
 
   <script src="app.js"></script>
